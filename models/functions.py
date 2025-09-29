@@ -94,6 +94,7 @@ def get_lang_feat_dim_type(model_name: str) -> int:
         raise NotImplementedError(model_name)
 
 def load_scene_model(model_name: str, model_dim: int, num_points: int, pretrained_weight: str=None, freeze: bool=True) -> torch.nn.Module:
+
     """ Load scene model
     
     Args:
