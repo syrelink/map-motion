@@ -13,14 +13,10 @@ contact_model:
   contact_type: 'contact_cont_joints' # ['contact_one_joints', 'contact_all_joints', 'contact_cont_joints', 'contact_pelvis']
   contact_joints: [0, 10, 11, 12, 20, 21]
 
-#  planes: [32, 64, 128, 256]
-#  num_points: ${task.dataset.num_points}
-#  blocks: [2, 2, 2, 2]
-  # 建议也将planes扩展到5个元素，以匹配5个编码器阶段
-  planes: [32, 64, 128, 256, 512]
-  num_points: ${task.dataset.num_points}
-  # 将blocks列表扩展到5个元素。这是一个常用的标准配置。
-  blocks: [2, 3, 4, 6, 3] # <--- 已修正！长度为5！
+ planes: [32, 64, 128, 256]
+ num_points: ${task.dataset.num_points}
+ blocks: [2, 2, 2, 2]
+
 
 ## 2. text
 text_model:

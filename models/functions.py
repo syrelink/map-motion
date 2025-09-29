@@ -2,6 +2,7 @@ import torch
 import clip
 from typing import List
 from models.scene_models.pointtransformer import pointtransformer_seg_repro, pointtransformer_enc_repro
+from models.scene_mamba.pointmamba import PointMambaSeg, PointMambaEnc, PointMambaBlock
 
 def load_and_freeze_bert_model(version: str) -> torch.nn.Module:
     """ Load BERT model and freeze its parameters.
@@ -111,11 +112,17 @@ def load_scene_model(model_name: str, model_dim: int, num_points: int, pretraine
         scene_model = pointtransformer_seg_repro(c=model_dim, num_points=num_points)
     elif model_name == 'PointTransformerEnc':
         scene_model = pointtransformer_enc_repro(c=model_dim, num_points=num_points)
+    elif model_name == 'PointMambaSeg':
+        # 与 PointTransformerSeg 对齐的 UNet 风格编码器-解码器
+        scene_model = PointMambaSeg(block=PointMambaBlock, blocks=[2, 2, 2, 2, 2], c=model_dim, num_points=num_points, grid_size=0.02)
+    elif model_name == 'PointMambaEnc':
+        # 仅编码器版本
+        scene_model = PointMambaEnc(block=PointMambaBlock, blocks=[2, 2, 2, 2, 2], c=model_dim, num_points=num_points, grid_size=0.02)
     else:
         raise NotImplementedError(model_name)
 
     ## load pretrained weight
-    if pretrained_weight is not None:
+    if pretrained_weight is not None and hasattr(scene_model, 'load_pretrained_weight'):
         scene_model.load_pretrained_weight(weight_path=pretrained_weight)
 
     ## freeze scene model weights

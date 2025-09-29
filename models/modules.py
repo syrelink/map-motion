@@ -6,7 +6,8 @@ from collections import OrderedDict
 from einops import rearrange
 
 # 导入自定义的PointTransformer模块
-from models.scene_models.pointtransformer import TransitionDown, TransitionUp, PointTransformerBlock
+from models.scene_models.pointtransformer import TransitionDown, TransitionUp
+from models.scene_mamba.pointmamba import PointMambaBlock
 
 def get_positional_encoding(max_len: int, time_emb_dim: int) -> torch.Tensor:
     """
@@ -80,7 +81,7 @@ class SceneMapEncoderDecoder(nn.Module):
         self.num_points = num_points
         # 输入特征维度 = 点云自身特征维度 + 3 (x,y,z坐标)
         self.c = point_feat_dim + 3
-        block = PointTransformerBlock # 使用PointTransformer的基本块
+        block = PointMambaBlock # 使用PointMamba的基本块
 
         self.in_planes, planes = self.c, planes
         share_planes = 8
@@ -164,7 +165,7 @@ class SceneMapEncoder(nn.Module):
         # ... (初始化代码与SceneMapEncoderDecoder的编码器部分完全相同) ...
         self.num_points = num_points
         self.c = point_feat_dim + 3
-        block = PointTransformerBlock
+        block = PointMambaBlock
 
         self.in_planes, planes = self.c, planes
         share_planes = 8

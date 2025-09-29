@@ -5,7 +5,9 @@ from omegaconf import DictConfig
 
 from models.base import Model
 from models.modules import TimestepEmbedder, CrossAttentionLayer, SelfAttentionBlock
-from models.scene_models.pointtransformer import TransitionDown, TransitionUp, PointTransformerBlock
+# from models.scene_models.pointtransformer import TransitionDown, TransitionUp, PointTransformerBlock
+from models.scene_models.pointtransformer import TransitionDown, TransitionUp
+from models.scene_mamba.pointmamba import PointMambaBlock
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from models.functions import load_scene_model
