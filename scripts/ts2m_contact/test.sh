@@ -6,6 +6,7 @@ then
     SEED=2023
 fi
 
+
 python test.py hydra/job_logging=none hydra/hydra_logging=none \
             exp_dir=${EXP_DIR} \
             seed=${SEED} \
