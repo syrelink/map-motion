@@ -675,6 +675,9 @@ class CDM(nn.Module):
         elif self.arch == 'PointTransV2':
             self.arch_cfg = cfg.arch_pointtrans
             CONTACT_MODEL = ContactPointTransV2
+        elif self.arch == 'ContactPerceiverWithMamba':
+            self.arch_cfg = cfg.arch_pointtrans
+            CONTACT_MODEL = ContactPerceiverWithMamba
         else:
             raise NotImplementedError
         
