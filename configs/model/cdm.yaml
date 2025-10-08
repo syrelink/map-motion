@@ -25,7 +25,7 @@ scene_model:
   freeze: true
 
 ## model architecture
-arch: 'MLP' # ['MLP', 'Perceiver', 'PointTrans']
+arch: 'Perceiver' # ['MLP', 'Perceiver', 'PointTrans']
 arch_mlp:
   last_dim: 512
   point_mlp_dims: [512, 512]

@@ -6,45 +6,13 @@ from omegaconf import DictConfig
 from models.base import Model
 from models.modules import TimestepEmbedder, CrossAttentionLayer, SelfAttentionBlock
 from models.scene_models.pointtransformer import TransitionDown, TransitionUp, PointTransformerBlock
+# from models.scene_models.pointtransformer import TransitionDown, TransitionUp
+# from models.scene_mamba.pointmamba import PointMambaBlock
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from models.functions import load_scene_model
 
 class PointSceneMLP(nn.Module):
-
-    def __init__(self, in_dim: int, out_dim: int, widening_factor: int=1, bias: bool=True) -> None:
-        super().__init__()
-        # 前置 MLP：用于特征投影和非线性变换
-        self.mlp_pre = nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.Linear(in_dim, widening_factor * in_dim, bias=bias),
-            nn.GELU(),
-            nn.Linear(widening_factor * in_dim, out_dim, bias=bias),
-        )
-
-        out_dim = out_dim * 2
-        # 后置 MLP：在拼接全局场景特征后进行二次处理
-        self.mlp_post = nn.Sequential(
-            nn.LayerNorm(out_dim),
-            nn.Linear(out_dim, out_dim, bias=bias),
-            nn.GELU(),
-            nn.Linear(out_dim, out_dim // 2, bias=bias),
-        )
-
-    def forward(self, point_feat: torch.Tensor) -> torch.Tensor:
-        point_feat = self.mlp_pre(point_feat) # [bs, N, out_dim]
-
-        # 计算全局场景特征：取所有点的平均特征
-        # mean(dim=1, keepdim=True): [bs, 1, out_dim]
-        # .repeat(1, point_feat.shape[1], 1): [bs, N, out_dim]，广播到所有点
-        scene_feat = point_feat.mean(dim=1, keepdim=True).repeat(1, point_feat.shape[1], 1)
-
-        # 核心操作：将局部点特征与全局场景特征拼接
-        point_feat = torch.cat([point_feat, scene_feat], dim=-1) # [bs, N, out_dim * 2]
-
-        point_feat = self.mlp_post(point_feat) # [bs, N, out_dim]
-
-        return point_feat
 
     def __init__(self, in_dim: int, out_dim: int, widening_factor: int=1, bias: bool=True) -> None:
         super().__init__()
@@ -320,9 +288,6 @@ class ContactPointTrans(nn.Module):
 
         return rearrange(x1, '(b n) d -> b n d', b=len(offset), n=offset[0]) # (b, n, planes[0])
 
-# --------------------------------------------------------------------------------------
-# 5. 架构变体 D: ContactPointTransV2 (改进版 Point Transformer - 多层融合)
-# -------------------------------------------------------------------------------
 class ContactPointTransV2(nn.Module):
 
     def __init__(self, arch_cfg: DictConfig, contact_dim: int, point_feat_dim: int, text_feat_dim: int, time_emb_dim: int) -> None:
@@ -393,16 +358,16 @@ class ContactPointTransV2(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor, point_feat: torch.Tensor, language_feat: torch.Tensor, time_embedding: torch.Tensor, **kwargs) -> torch.Tensor:
-        """ 前向传播 (Forward pass) 的 ContactMLP。
+        """ Forward pass of the ContactMLP.
 
         Args:
-            x: 输入的接触图/Affordance Map (带噪信号)，形状为 [bs, num_points, contact_dim]。
-            point_feat: 场景点云特征，形状为 [bs, num_points, point_feat_dim]。
-            language_feat: 语言描述的特征嵌入 (如 CLIP 特征)，形状为 [bs, 1, language_feat_dim]。
-            time_embedding: 扩散模型的时间步嵌入，形状为 [bs, 1, time_embedding_dim]。
+            x: input contact map, [bs, num_points, contact_dim]
+            point_feat: [bs, num_points, point_feat_dim]
+            language_feat: [bs, 1, language_feat_dim]
+            time_embedding: [bs, 1, time_embedding_dim]
         
         Returns:
-            输出的接触图特征，形状为 [bs, num_points, contact_dim]。
+            Output contact map, [bs, num_points, contact_dim]
         """
         p = kwargs['c_pc_xyz']
 
@@ -446,10 +411,6 @@ class ContactPointTransV2(nn.Module):
 
         return rearrange(x1, '(b n) d -> b n d', b=len(offset)) # (b, n, planes[0])
 
-# --------------------------------------------------------------------------------------
-# 6. 主模型：CDM (Conditional Diffusion Model)
-# 负责集成所有条件输入并调用核心架构
-# --------------------------------------------------------------------------------------
 @Model.register()
 class CDM(nn.Module):
     def __init__(self, cfg: DictConfig, *args, **kwargs):
@@ -459,11 +420,11 @@ class CDM(nn.Module):
         self.contact_type = cfg.data_repr
         self.contact_dim = cfg.input_feats
 
-        # 时间嵌入模块 (用于扩散模型的时间步 T)
+        ## time embedding
         self.time_emb_dim = cfg.time_emb_dim
         self.timestep_embedder = TimestepEmbedder(self.time_emb_dim, self.time_emb_dim, max_len=1000)
 
-        # 文本模型 (CLIP 或 BERT) 加载
+        ## text
         self.text_model_name = cfg.text_model.version
         self.text_max_length = cfg.text_model.max_length
         self.text_feat_dim, self.text_feat_type = get_lang_feat_dim_type(self.text_model_name)
@@ -474,7 +435,7 @@ class CDM(nn.Module):
         else:
             raise NotImplementedError
 
-        # 场景特征维度确定
+        ## scene
         if not cfg.scene_model.use_scene_model:
             self.point_feat_dim = 0
         elif cfg.scene_model.use_openscene:
@@ -486,7 +447,7 @@ class CDM(nn.Module):
                 cfg.scene_model.name, self.scene_model_dim, cfg.scene_model.num_points, cfg.scene_model.pretrained_weight, freeze=self.freeze_scene_model)
             self.point_feat_dim = cfg.scene_model.point_feat_dim
 
-        # 根据配置选择核心架构 (MLP, Perceiver, PointTrans)
+        ## model architecture
         self.arch = cfg.arch
         if self.arch == 'MLP':
             self.arch_cfg = cfg.arch_mlp
@@ -502,8 +463,6 @@ class CDM(nn.Module):
             CONTACT_MODEL = ContactPointTransV2
         else:
             raise NotImplementedError
-        
-        # 实例化核心接触生成器
         self.contact_model = CONTACT_MODEL(
             self.arch_cfg,
             contact_dim=self.contact_dim,
@@ -512,7 +471,6 @@ class CDM(nn.Module):
             time_emb_dim=self.time_emb_dim
         )
 
-        # 最终输出层：将接触模型的输出特征映射回接触图的维度
         self.contact_layer = nn.Linear(self.arch_cfg.last_dim, self.contact_dim, bias=True)
 
     def forward(self, x, timesteps, **kwargs):
@@ -551,9 +509,7 @@ class CDM(nn.Module):
         else:
             pc_emb = self.scene_model((kwargs['c_pc_xyz'], kwargs['c_pc_feat'])).detach() # [bs, num_points, point_feat_dim]
 
-        # 4. 核心接触模型处理 (假设所有条件已准备好)
         x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # [bs, num_points, last_dim]
-        # 5. 最终线性层映射
         x = self.contact_layer(x) # [bs, num_points, contact_dim]
 
         return x

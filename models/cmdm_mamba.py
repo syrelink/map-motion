@@ -14,7 +14,7 @@ from utils.misc import compute_repr_dimesion
 # 将原来的 SceneMapEncoder 直接变成 PointMambaEnc 的一个实例
 # 定义一个新的SceneMapEncoder类，它继承自我们写的PointMambaEnc
 class SceneMapEncoder(PointMambaEnc):
-    def __init__(self, point_feat_dim: int, planes: list, blocks: list, num_points: int=8192) -> None:
+    def __init__(self, point_feat_dim: int, planes: list, blocks: list, num_points: int=8192, use_original_serialization: bool=True) -> None:
         # 关键修正: 从配置中获取grid_size, 如果没有则使用默认值
         grid_size = planes[0] / 32.0 if isinstance(planes[0], float) else 0.02 # 这是一个临时的解决方案
         super().__init__(
@@ -22,7 +22,8 @@ class SceneMapEncoder(PointMambaEnc):
             blocks=blocks,
             c=point_feat_dim + 3,
             num_points=num_points,
-            grid_size=0.02 # <-- 将grid_size传递下去
+            grid_size=grid_size,
+            use_original_serialization=use_original_serialization  # 新增参数，控制是否使用原始PointMamba序列化
         )
 
 # 同样地，将SceneMapEncoderDecoder指向PointMambaSeg
@@ -66,11 +67,15 @@ class CMDM(nn.Module):
 
         else:
             raise NotImplementedError
+        # 检查是否配置了使用原始PointMamba序列化
+        use_original_serialization = getattr(cfg.contact_model, 'use_original_serialization', True)
+        
         self.contact_encoder = SceneMapModule(
             point_feat_dim=self.contact_dim,
             planes=self.planes,
             blocks=cfg.contact_model.blocks,
             num_points=cfg.contact_model.num_points,
+            use_original_serialization=use_original_serialization,
         )
 
         

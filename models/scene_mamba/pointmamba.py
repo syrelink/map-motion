@@ -49,18 +49,60 @@ class PointMambaBlock(nn.Module):
 
 
 class PointMambaEnc(nn.Module):
-    def __init__(self, block, blocks, c=6, num_points=8192, grid_size=0.02):
+    def __init__(self, block, blocks, c=6, num_points=8192, grid_size=0.02, use_original_serialization=True):
         super().__init__()
         self.num_points = num_points
         self.c = c
-        self.in_planes, planes = c, [32, 64, 128, 256, 512]
+        self.grid_size = grid_size
+        self.use_original_serialization = use_original_serialization
+        
+        if use_original_serialization and ORIGINAL_POINTMAMBA_AVAILABLE:
+            # 使用原始PointMamba的架构
+            self._init_original_pointmamba()
+        else:
+            # 使用当前的层次化架构
+            self._init_hierarchical_architecture(block, blocks)
+
+    def _init_original_pointmamba(self):
+        """初始化原始PointMamba架构"""
+        self.trans_dim = 256
+        self.depth = 4
+        
+        # 点云分组
+        self.group_size = 32
+        self.num_group = 64
+        self.group_divider = Group(num_group=self.num_group, group_size=self.group_size)
+        
+        # 编码器
+        self.encoder = Encoder(encoder_channel=256)
+        
+        # 位置编码
+        self.pos_embed = nn.Sequential(
+            nn.Linear(3, 128),
+            nn.GELU(),
+            nn.Linear(128, self.trans_dim)
+        )
+        
+        # Mamba编码器
+        self.blocks = MixerModel(
+            d_model=self.trans_dim,
+            n_layer=self.depth,
+            rms_norm=True
+        )
+        
+        # 输出适配器
+        self.output_adapter = nn.Linear(self.trans_dim, 256)
+
+    def _init_hierarchical_architecture(self, block, blocks):
+        """初始化层次化架构（原始实现）"""
+        self.in_planes, planes = self.c, [32, 64, 128, 256, 512]
         stride, nsample = [1, 4, 4, 4, 4], [8, 16, 16, 16, 16]
 
-        self.enc1 = self._make_enc(block, planes[0], blocks[0], stride=stride[0], nsample=nsample[0], grid_size=grid_size)
-        self.enc2 = self._make_enc(block, planes[1], blocks[1], stride=stride[1], nsample=nsample[1], grid_size=grid_size)
-        self.enc3 = self._make_enc(block, planes[2], blocks[2], stride=stride[2], nsample=nsample[2], grid_size=grid_size)
-        self.enc4 = self._make_enc(block, planes[3], blocks[3], stride=stride[3], nsample=nsample[3], grid_size=grid_size)
-        self.enc5 = self._make_enc(block, planes[4], blocks[4], stride=stride[4], nsample=nsample[4], grid_size=grid_size)
+        self.enc1 = self._make_enc(block, planes[0], blocks[0], stride=stride[0], nsample=nsample[0], grid_size=self.grid_size)
+        self.enc2 = self._make_enc(block, planes[1], blocks[1], stride=stride[1], nsample=nsample[1], grid_size=self.grid_size)
+        self.enc3 = self._make_enc(block, planes[2], blocks[2], stride=stride[2], nsample=nsample[2], grid_size=self.grid_size)
+        self.enc4 = self._make_enc(block, planes[3], blocks[3], stride=stride[3], nsample=nsample[3], grid_size=self.grid_size)
+        self.enc5 = self._make_enc(block, planes[4], blocks[4], stride=stride[4], nsample=nsample[4], grid_size=self.grid_size)
 
     def _make_enc(self, block, planes, blocks, stride=1, nsample=16, grid_size=0.02):
         layers = []
@@ -71,6 +113,42 @@ class PointMambaEnc(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, p, x=None):
+        if self.use_original_serialization and ORIGINAL_POINTMAMBA_AVAILABLE:
+            return self._forward_original_pointmamba(p, x)
+        else:
+            return self._forward_hierarchical(p, x)
+
+    def _forward_original_pointmamba(self, p, x=None):
+        """使用原始PointMamba的前向传播"""
+        # 1. 点云分组
+        neighborhood, center = self.group_divider(p)
+        
+        # 2. 局部特征提取
+        group_tokens = self.encoder(neighborhood)  # B G N
+        pos_embed = self.pos_embed(center)  # B G C
+        
+        # 3. 双向序列化处理（原始PointMamba的核心特性）
+        _, _, _, tokens_forward, pos_forward = serialization_func(
+            center, group_tokens, pos_embed, 'hilbert'
+        )
+        _, _, _, tokens_backward, pos_backward = serialization_func(
+            center, group_tokens, pos_embed, 'hilbert-trans'
+        )
+        
+        # 4. 合并前向和后向序列
+        tokens = torch.cat([tokens_forward, tokens_backward], dim=1)
+        pos = torch.cat([pos_forward, pos_backward], dim=1)
+        
+        # 5. Mamba处理
+        x = tokens + pos
+        x = self.blocks(x)
+        
+        # 6. 输出适配
+        output = self.output_adapter(x.mean(1))  # 全局平均池化
+        return output
+
+    def _forward_hierarchical(self, p, x=None):
+        """使用层次化架构的前向传播（原始实现）"""
         if x is not None:
             pxo = self._pack_pxo(p, x)
         else:
