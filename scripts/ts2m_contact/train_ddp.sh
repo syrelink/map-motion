@@ -20,5 +20,5 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --rdzv_backend=c
             task.dataset.sigma=0.8 \
             task.dataset.sets=["HUMANISE"] \
             model=cdm \
-            model.arch=Perceiver
+            model.arch=ContactPerceiverWithMamba
             
