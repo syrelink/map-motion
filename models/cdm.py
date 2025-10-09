@@ -676,11 +676,10 @@ class CDM(nn.Module):
             self.arch_cfg = cfg.arch_pointtrans
             CONTACT_MODEL = ContactPointTransV2
         elif self.arch == 'ContactPerceiverWithMamba':
-            self.arch_cfg = cfg.arch_pointtrans
+            self.arch_cfg = cfg.arch_perceiver_with_mamba
             CONTACT_MODEL = ContactPerceiverWithMamba
         else:
             raise NotImplementedError
-        print("此时使用的是：---------："+CONTACT_MODEL)
 
         # 实例化核心接触生成器
         self.contact_model = CONTACT_MODEL(
