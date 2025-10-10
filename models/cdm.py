@@ -688,8 +688,7 @@ class CDM(nn.Module):
             CONTACT_MODEL = ContactPointTransV2
         # ================= 您新增的分支 =================
         elif self.arch == 'ContactPerceiverWithMamba':
-            # 注意：这里的 arch_cfg 可能需要专门为 Mamba 配置，或者复用 perceiver 的配置
-            self.arch_cfg = cfg.arch_perceiver 
+            self.arch_cfg = cfg.arch_perceiver_with_mamba
             CONTACT_MODEL = ContactPerceiverWithMamba
         # ===============================================
         else:

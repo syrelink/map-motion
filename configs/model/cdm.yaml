@@ -54,3 +54,33 @@ arch_pointtrans:
   last_dim: 64
   num_points: ${task.dataset.num_points}
   blocks: [2, 2, 2, 2]
+
+  # ================================================================
+# ================ 新增的 ContactPerceiverWithMamba 配置 =============
+# ================================================================
+arch_perceiver_with_mamba:
+  # --- 首先，完全复制 arch_perceiver 的所有参数 ---
+  last_dim: 256
+  point_pos_emb: true
+  encoder_q_input_channels: 512
+  encoder_kv_input_channels: 256
+  encoder_num_heads: 8
+  encoder_widening_factor: 1
+  encoder_dropout: 0.1
+  encoder_residual_dropout: 0.0
+  encoder_self_attn_num_layers: 2 # 这个参数现在控制 Mamba 层的数量
+
+  decoder_q_input_channels: 256
+  decoder_kv_input_channels: 512 # must be equal to encoder_q_input_channels
+  decoder_num_heads: 8
+  decoder_widening_factor: 1
+  decoder_dropout: 0.1
+  decoder_residual_dropout: 0.0
+
+  # --- 然后，添加 Mamba 专属的超参数 ---
+  mamba_d_state: 16
+  mamba_d_conv: 4
+  mamba_expand: 2
+# ================================================================
+# ========================= 配置添加结束 =========================
+# ================================================================
