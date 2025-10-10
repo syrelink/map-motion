@@ -753,7 +753,7 @@ class CDM(nn.Module):
             pc_emb = self.scene_model((kwargs['c_pc_xyz'], kwargs['c_pc_feat'])).detach() # [bs, num_points, point_feat_dim]
 
         # --- 步骤B：调用核心模型进行去噪 ---
-        # 将带噪输入x和所有条件嵌入都送入核心模型
+        # 将带噪输入x和所有条件嵌入都送入核心模型，比如ContactPerceiverWithMamba
         x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # 输出形状: [bs, num_points, last_dim]
         
         # --- 步骤C：通过输出层得到最终结果 ---
