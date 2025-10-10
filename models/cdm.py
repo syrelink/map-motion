@@ -160,7 +160,6 @@ class ContactPerceiver(nn.Module):
         self.decoder_residual_dropout = arch_cfg.decoder_residual_dropout
 
         # --- 适配器 (Adapters): 用于维度匹配 ---
-        
         # 语言特征适配器：映射到 Encoder Query 维度
         self.language_adapter = nn.Linear(
             text_feat_dim,
@@ -190,7 +189,9 @@ class ContactPerceiver(nn.Module):
         # 1. Encoder Cross-Attention (Encode Block: 场景信息压缩到 Latent)
         self.encoder_cross_attn = CrossAttentionLayer(
             num_heads=self.encoder_num_heads,
+            # q代表时间步和文本条件
             num_q_input_channels=self.encoder_q_input_channels,
+            # kv代表3D场景点云特征
             num_kv_input_channels=self.encoder_kv_input_channels,
             widening_factor=self.encoder_widening_factor,
             dropout=self.encoder_dropout,
@@ -221,13 +222,13 @@ class ContactPerceiver(nn.Module):
         """ 前向传播：实现 Perceiver 的 Encode -> Process -> Decode 流程。
 
         Args:
-            x: 输入接触图 (带噪信号)，[bs, num_points, contact_dim]
-            point_feat: 场景点特征，[bs, num_points, point_feat_dim]
+            x: 输入接触图 (带噪信号),[bs, num_points, contact_dim] (最终生成的地图,只不过加入了噪声)
+            point_feat: 场景点特征，[bs, num_points, point_feat_dim] (是描述3D场景的静态特征信息)
             language_feat: 语言特征，[bs, 1, language_feat_dim]
             time_embedding: 时间嵌入，[bs, 1, time_embedding_dim]
         
         Returns:
-            去噪后的输出特征，[bs, num_points, dec_q_dim]
+            去噪后的输出特征，[bs, num_points, dec_q_dim] 输入接触图(不带噪声)
         """
         # 1. 准备 Encoder Key/Value (KV) 输入 (大规模场景点特征)
         if point_feat is not None:
@@ -628,17 +629,25 @@ class ContactPointTransV2(nn.Module):
 @Model.register()
 class CDM(nn.Module):
     def __init__(self, cfg: DictConfig, *args, **kwargs):
+        """
+        Conditional Diffusion Model (CDM) 的初始化函数。
+        这个类是 Affordance Diffusion Model (ADM) 的总封装和入口。
+        它负责根据配置文件，组装所有需要的子模块。
+        """
         super().__init__()
         self.device = kwargs['device'] if 'device' in kwargs else 'cpu'
 
+        # --- 1. 基本参数设置 ---
         self.contact_type = cfg.data_repr
-        self.contact_dim = cfg.input_feats
+        self.contact_dim = cfg.input_feats  # Affordance Map (接触图) 的特征维度
 
-        # 时间嵌入模块 (用于扩散模型的时间步 T)
+        # --- 2. 时间嵌入模块 (Time Embedding) ---
+        # 将扩散步数 t (一个整数) 编码成一个高维向量
         self.time_emb_dim = cfg.time_emb_dim
         self.timestep_embedder = TimestepEmbedder(self.time_emb_dim, self.time_emb_dim, max_len=1000)
 
-        # 文本模型 (CLIP 或 BERT) 加载
+        # --- 3. 文本模型加载 (Text Model) ---
+        # 负责将文本指令编码成特征向量
         self.text_model_name = cfg.text_model.version
         self.text_max_length = cfg.text_model.max_length
         self.text_feat_dim, self.text_feat_type = get_lang_feat_dim_type(self.text_model_name)
@@ -649,7 +658,8 @@ class CDM(nn.Module):
         else:
             raise NotImplementedError
 
-        # 场景特征维度确定
+        # --- 4. 场景特征提取模型 (Scene Feature Extractor) ---
+        # (可选) 负责将原始点云编码成更丰富的深度特征
         if not cfg.scene_model.use_scene_model:
             self.point_feat_dim = 0
         elif cfg.scene_model.use_openscene:
@@ -661,7 +671,8 @@ class CDM(nn.Module):
                 cfg.scene_model.name, self.scene_model_dim, cfg.scene_model.num_points, cfg.scene_model.pretrained_weight, freeze=self.freeze_scene_model)
             self.point_feat_dim = cfg.scene_model.point_feat_dim
 
-        # 根据配置选择核心架构 (MLP, Perceiver, PointTrans)
+        # --- 5. 核心架构选择 (The "Brain" of the Denoiser) ---
+        # 这是整个模型最核心的部分，根据配置文件选择不同的网络结构来执行去噪任务
         self.arch = cfg.arch
         if self.arch == 'MLP':
             self.arch_cfg = cfg.arch_mlp
@@ -675,14 +686,17 @@ class CDM(nn.Module):
         elif self.arch == 'PointTransV2':
             self.arch_cfg = cfg.arch_pointtrans
             CONTACT_MODEL = ContactPointTransV2
+        # ================= 您新增的分支 =================
         elif self.arch == 'ContactPerceiverWithMamba':
-            self.arch_cfg = cfg.arch_pointtrans
+            # 注意：这里的 arch_cfg 可能需要专门为 Mamba 配置，或者复用 perceiver 的配置
+            self.arch_cfg = cfg.arch_perceiver 
             CONTACT_MODEL = ContactPerceiverWithMamba
+        # ===============================================
         else:
             raise NotImplementedError
-        print("此时使用的是：---------："+CONTACT_MODEL)
 
-        # 实例化核心接触生成器
+        # --- 6. 实例化核心模型 ---
+        # 根据上面的选择，创建核心去噪模型的实例
         self.contact_model = CONTACT_MODEL(
             self.arch_cfg,
             contact_dim=self.contact_dim,
@@ -691,23 +705,28 @@ class CDM(nn.Module):
             time_emb_dim=self.time_emb_dim
         )
 
-        # 最终输出层：将接触模型的输出特征映射回接触图的维度
+        # --- 7. 最终输出层 ---
+        # 一个线性层，负责将核心模型的输出特征映射回 Affordance Map 的原始维度
         self.contact_layer = nn.Linear(self.arch_cfg.last_dim, self.contact_dim, bias=True)
 
     def forward(self, x, timesteps, **kwargs):
-        """ Forward pass of the model.
+        """
+        模型的前向传播函数，定义了一次完整的去噪步骤。
         
         Args:
-            x: input contact map, [bs, num_points, contact_dim]
-            kwargs: other inputs, e.g., text, etc.
+            x: 带噪声的输入接触图 (input contact map), 形状 [bs, num_points, contact_dim]
+            timesteps: 当前的扩散时间步 t
+            **kwargs: 包含所有其他条件信息的字典，如 c_text, c_pc_xyz 等
         
         Returns:
-            Output contact map, [bs, num_points, contact_dim]
+            去噪一步后的接触图, 形状 [bs, num_points, contact_dim]
         """
-        ## time embedding
+        # --- 步骤A：准备所有条件嵌入 (Prepare Conditional Embeddings) ---
+
+        # 1. 编码时间步
         time_emb = self.timestep_embedder(timesteps) # [bs, 1, time_emb_dim]
 
-        ## text embedding
+        # 2. 编码文本指令
         if self.text_feat_type == 'clip':
             text_emb = encode_text_clip(self.text_model, kwargs['c_text'], max_length=self.text_max_length, device=self.device)
         elif self.text_feat_type == 'bert':
@@ -716,23 +735,28 @@ class CDM(nn.Module):
             raise NotImplementedError
         text_emb = text_emb.unsqueeze(1).detach().float()  # [bs, 1, text_feat_dim]
 
-        ## scene embedding
+        # 3. 编码场景信息 (获取场景点特征)
         if not hasattr(self, 'scene_model'):
+            # 如果没有配置专门的场景模型，则直接使用传入的特征
             if self.point_feat_dim == 0:
                 pc_emb = None
             elif self.point_feat_dim == 1:
                 if kwargs['c_pc_feat'].shape[-1] == 1:
                     pc_emb = kwargs['c_pc_feat']
                 else:
+                    # 通过与文本特征做点积来计算一个单维度的特征
                     pc_emb = einsum(kwargs['c_pc_feat'], text_emb, 'b n d, b m d -> b n m') # [bs, num_points, 1]
             else:
                 pc_emb = kwargs['c_pc_feat'] # [bs, num_points, 768]
         else:
+            # 如果配置了场景模型，则用它来提取深度特征
             pc_emb = self.scene_model((kwargs['c_pc_xyz'], kwargs['c_pc_feat'])).detach() # [bs, num_points, point_feat_dim]
 
-        # 4. 核心接触模型处理 (假设所有条件已准备好)
-        x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # [bs, num_points, last_dim]
-        # 5. 最终线性层映射
-        x = self.contact_layer(x) # [bs, num_points, contact_dim]
+        # --- 步骤B：调用核心模型进行去噪 ---
+        # 将带噪输入x和所有条件嵌入都送入核心模型
+        x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # 输出形状: [bs, num_points, last_dim]
+        
+        # --- 步骤C：通过输出层得到最终结果 ---
+        x = self.contact_layer(x) # 映射回目标维度: [bs, num_points, contact_dim]
 
         return x
