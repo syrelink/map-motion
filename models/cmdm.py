@@ -154,10 +154,10 @@ class CMDM(nn.Module):
             )
 
             # 2. 交叉注意力模块 (Cross-Attention)
-            #    实例化我们刚刚编写的 CrossDCA 模块。
+            #    实例化我们刚刚修正好的 CrossDCA 模块。
             self.dca_cross_attention = CrossDCA(
                 query_dim=self.latent_dim,
-                features=self.planes, # 来自 contact_model.planes
+                features=self.planes, # <-- 关键修改：将 memory_features 改为 features
                 # 以下参数需要您在配置文件中定义
                 patch=cfg.dca.patch,
                 strides=cfg.dca.strides,

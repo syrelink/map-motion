@@ -384,7 +384,7 @@ class DCA(nn.Module):
 # 【修正后】的交叉注意力 DCA 模块 (Corrected CrossDCA Module)
 # ==============================================================================
 
-class CrossDCA(DCA):
+class CrossDCA(DCA):  # 明确继承自 DCA 类
     def __init__(self, features, query_dim, **kwargs):
         """
         用于交叉注意力的DCA模块。
@@ -392,9 +392,11 @@ class CrossDCA(DCA):
         - query_dim: query (动作序列) 的特征维度。
         - **kwargs: 传递给父类DCA的其他参数 (如 patch, strides, n, channel_head等)。
         """
-        # 1. 调用父类(DCA)的构造函数来构建处理memory的模块
+        # 1. 调用父类(DCA)的构造函数
+        #    它会创建为处理多尺度 memory (场景特征) 准备的模块
+        #    例如 self.patch_avg, self.avg_map, self.attention, self.upconvs
         super().__init__(features=features, **kwargs)
-
+        
         # 2. 为单尺度的 Query (动作序列) 创建专属的处理模块
         self.query_patch_avg = PoolEmbedding(
             pooling=nn.AdaptiveAvgPool2d,
@@ -408,81 +410,82 @@ class CrossDCA(DCA):
             padding=(0, 0),
         )
 
-        # 3. 改造父类的注意力模块以适应交叉注意力
-        # 我们需要用新的模块替换父类中的self.attention
-        self.attention = nn.ModuleList()
-        for _ in range(self.n):
-            # 为每个block创建一个交叉注意力版本
-            cross_att_block = self.create_cross_attention_block(query_dim, features, self.channel_head, self.spatial_head)
-            self.attention.append(cross_att_block)
+        # 3. 为 Query 准备专用的上采样和后处理模块
+        #    我们直接复用父类为第一个尺度创建的模块，因为Query是单尺度的
+        #    假设 stride[0] 是最大的缩放比例
+        if not self.upconvs or not self.bn_relu:
+             raise ValueError("Parent DCA class was not initialized correctly. 'upconvs' or 'bn_relu' is missing.")
+        self.query_upconv = self.upconvs[0]
+        self.query_bn_relu = self.bn_relu[0]
 
-        # 4. 为Query准备独立的后处理模块
-        # 父类的upconvs和bn_relu是ModuleList，不适合单尺度Query
-        # strides 参数需要从kwargs中获取，如果不存在则使用默认值
-        strides = kwargs.get('strides', [8, 4, 2, 1])
-        self.query_upconv = UpsampleConv(
-            in_features=query_dim, out_features=query_dim, scale=strides[0], conv='conv'
-        )
-        self.query_bn_relu = nn.Sequential(nn.BatchNorm2d(query_dim), nn.ReLU())
 
-    def create_cross_attention_block(self, query_dim, mem_features, channel_head, spatial_head):
-        """ 辅助函数：创建用于交叉注意力的模块 """
-        # 创建一个通用模块，因为实际的交叉逻辑在forward中实现
-        # 注意：这里的in_features和out_features需要特别设置
-        block = nn.Module()
-        block.query_norm_s = nn.LayerNorm(query_dim, eps=1e-6)
-        block.mem_norm_s = nn.ModuleList([nn.LayerNorm(f, eps=1e-6) for f in mem_features])
-        block.s_attention = SpatialAttention(
-            in_features=sum(mem_features),
-            out_features=query_dim,
-            n_heads=spatial_head[0] if isinstance(spatial_head, list) else spatial_head
-        )
-        # 您也可以在这里为通道注意力添加类似模块
-        return block
-        
     def forward(self, query, memory):
         """
+        前向传播函数
         query: 动作序列特征, 形状 [bs, seq_len, query_dim]
         memory: 多尺度的场景特征, 一个包含多个特征图的元组/列表
         """
         # --- 1. 预处理 Memory 和 Query ---
+        # 对多尺度的 Memory (场景特征) 进行处理，得到 token 序列
         mem_tokens = self.m_apply(memory, self.patch_avg)
         mem_tokens = self.m_apply(mem_tokens, self.avg_map)
 
+        # 对单尺度的 Query (动作特征) 进行处理
+        # 首先需要将 [bs, seq_len, C] -> [bs, C, H, W] 的图像格式
         B, L, C = query.shape
-        # 确保序列长度可以开方，否则需要更复杂的处理
         H = W = int(L**0.5)
         if H * W != L:
-            raise ValueError(f"序列长度 {L} 无法开方成整数，请检查输入维度或调整模型设计。")
+            # 如果序列长度不是一个完美的平方数，会引发错误。
+            # 您的模型设计需要保证这一点。
+            # 例如，如果 latent_dim=512, 序列长度为 64, 则 H=W=8。
+            raise ValueError(f"Sequence length {L} is not a perfect square. Cannot reshape to a square image.")
         query_reshaped = einops.rearrange(query, 'B (H W) C -> B C H W', H=H, W=W)
 
+        # 将 Query 也转换成与 memory tokens 格式一致的 token 序列
         query_tokens = self.query_patch_avg(query_reshaped)
         query_tokens = self.query_avg_map(query_tokens)
 
         # --- 2. 执行交叉注意力 ---
+        # Q 来自 query_tokens, K 和 V 来自 mem_tokens
+        # 遍历每一个注意力块 (在您的配置中 n 通常为 1)
         for block in self.attention:
-            q_norm = block.query_norm_s(query_tokens)
-            mem_norm_list = [norm(mem) for norm, mem in zip(block.mem_norm_s, mem_tokens)]
+            # 为 Query 和 Memory 分别进行归一化
+            # CCSABlock 中的 norm 层是 ModuleList，我们需要手动选择
+            # Query 是单尺度的，我们用第一个 norm 层
+            q_norm = block.spatial_norm[0](query_tokens)
+            mem_norm_list = block.m_apply(mem_tokens, block.spatial_norm)
+
+            # 用于生成 Key 和 Value 的源，由所有尺度的 memory 拼接而成
+            kv_source = block.cat(*mem_norm_list)
+
+            # 构建交叉注意力的输入: [[Query, Key_Source, Value_Source]]
+            # 这里的输入格式是为 s_attention 模块准备的
+            x_in_spatial = [[q_norm, kv_source, kv_source]]
             
-            kv_source = torch.cat(mem_norm_list, dim=2)
-            
-            # 执行空间交叉注意力
-            att_out = block.s_attention([q_norm, kv_source, kv_source])
+            # s_attention 也是 ModuleList，我们只对 Query 进行计算，所以也只用第一个
+            att_out = block.s_attention[0](x_in_spatial[0]) # 直接传入列表元素
             
             # 残差连接
             query_tokens = query_tokens + att_out
+            
+            # (如果需要，也可以在这里加入通道交叉注意力，逻辑类似)
 
         # --- 3. 后处理并返回 ---
+        # 此时的 query_tokens 是经过场景信息增强后的动作 tokens
+        # 将其变回 [B, C, H, W] 的图像格式
         x = self.reshape(query_tokens)
+
+        # 上采样回原始分辨率
         x = self.query_upconv(x)
-        
+
+        # 与原始的 query(reshaped) 进行残差连接
         x_out = x + query_reshaped
         x_out = self.query_bn_relu(x_out)
-        
-        x_out = einops.rearrange(x_out, 'B C H W -> B (H W) C')
-        
-        return x_out
 
+        # 最后，重新变回 [B, L, C] 的序列格式
+        x_out = einops.rearrange(x_out, 'B C H W -> B (H W) C')
+
+        return x_out
 
 # ==============================================================================
 # 测试代码 (Test Code)
