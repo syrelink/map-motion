@@ -9,6 +9,7 @@ from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
+from models.DCA import DCA
 
 
 @Model.register()
@@ -92,7 +93,7 @@ class CMDM(nn.Module):
                 enable_nested_tensor=False,
                 num_layers=sum(cfg.num_layers),  # 总层数
             )
-        elif self.arch == 'trans_dec':
+        elif self.arch == ' ':
             # 如果是Decoder架构，则需要手动搭建自注意力和交叉注意力的交替结构
             self.self_attn_layers = nn.ModuleList()
             self.kv_mappling_layers = nn.ModuleList()
@@ -133,6 +134,35 @@ class CMDM(nn.Module):
                             batch_first=True,
                         )
                     )
+# ==================== 新增的 trans_DCA 架构 ====================
+        elif self.arch == 'trans_DCA':
+            # 1. 自注意力模块 (Self-Attention)
+            #    负责处理动作序列自身的时间依赖。我们仍然可以使用一个标准的TransformerEncoder。
+            self.motion_self_attention = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=self.latent_dim,
+                    nhead=cfg.num_heads,
+                    dim_feedforward=cfg.dim_feedforward,
+                    dropout=cfg.dropout,
+                    activation='gelu',
+                    batch_first=True,
+                ),
+                num_layers=sum(cfg.num_layers) # 使用总层数作为深度
+            )
+
+            # 2. 交叉注意力模块 (Cross-Attention)
+            #    实例化我们刚刚编写的 CrossDCA 模块。
+            self.dca_cross_attention = CrossDCA(
+                query_dim=self.latent_dim,
+                memory_features=self.planes, # 来自 contact_model.planes
+                # 以下参数需要您在配置文件中定义
+                patch=cfg.dca.patch,
+                strides=cfg.dca.strides,
+                n=cfg.dca.n_blocks,
+                channel_head=cfg.dca.channel_head,
+                spatial_head=cfg.dca.spatial_head
+            )
+        # =============================================================
         else:
             raise NotImplementedError
 
@@ -206,6 +236,7 @@ class CMDM(nn.Module):
             x = x[:, non_motion_token:, :]
 
         elif self.arch == 'trans_dec':
+
             # Decoder架构：将时间、文本和动作作为Query序列
             x = torch.cat([time_emb, text_emb, x], dim=1)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
@@ -235,6 +266,24 @@ class CMDM(nn.Module):
             # 丢弃条件信息的输出部分，只保留动作部分的输出
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
+        # ==================== 新的 trans_DCA 前向传播逻辑 ====================
+        elif self.arch == 'trans_DCA':
+            # 1. 准备 Query 序列 (同 trans_dec)
+            x = torch.cat([time_emb, text_emb, x], dim=1)
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+            # ... (准备 x_mask) ...
+
+            # 2. 先进行自注意力，处理动作序列的时间逻辑
+            x = self.motion_self_attention(x, src_key_padding_mask=x_mask)
+
+            # 3. 再进行交叉注意力，让动作序列“查阅”多尺度的场景地图
+            #    cont_emb 是 SceneMapEncoderDecoder 输出的特征列表
+            x = self.dca_cross_attention(query=x, memory=cont_emb)
+
+            # 4. 丢弃条件信息的输出部分 (同 trans_dec)
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        # =================================================================
         else:
             raise NotImplementedError
 
