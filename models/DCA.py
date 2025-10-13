@@ -384,20 +384,25 @@ class DCA(nn.Module):
 # 【修正后】的交叉注意力 DCA 模块 (Corrected CrossDCA Module)
 # ==============================================================================
 
-class CrossDCA(DCA):  # 明确继承自 DCA 类
+import math
+import torch
+import torch.nn as nn
+import torch.nn.functional as F
+import einops
+
+# (确保 DCA.py 文件顶部有这些 import)
+# (其他的类如 DCA, CCSABlock, PoolEmbedding 等保持不变)
+
+class CrossDCA(DCA):
+    """
+    一个经过优化、健壮且灵活的 CrossDCA 模块。
+    - 修复了因 memory 特征图维度缺失导致的 einops 错误。
+    - 通过自动填充，支持任意长度的 query 动作序列。
+    """
     def __init__(self, features, query_dim, **kwargs):
-        """
-        用于交叉注意力的DCA模块。
-        - features: memory (场景特征) 的多尺度特征维度列表。
-        - query_dim: query (动作序列) 的特征维度。
-        - **kwargs: 传递给父类DCA的其他参数 (如 patch, strides, n, channel_head等)。
-        """
-        # 1. 调用父类(DCA)的构造函数
-        #    它会创建为处理多尺度 memory (场景特征) 准备的模块
-        #    例如 self.patch_avg, self.avg_map, self.attention, self.upconvs
         super().__init__(features=features, **kwargs)
         
-        # 2. 为单尺度的 Query (动作序列) 创建专属的处理模块
+        # 为单尺度的 Query (动作序列) 创建专属的处理模块
         self.query_patch_avg = PoolEmbedding(
             pooling=nn.AdaptiveAvgPool2d,
             patch=self.patch
@@ -410,80 +415,80 @@ class CrossDCA(DCA):  # 明确继承自 DCA 类
             padding=(0, 0),
         )
 
-        # 3. 为 Query 准备专用的上采样和后处理模块
-        #    我们直接复用父类为第一个尺度创建的模块，因为Query是单尺度的
-        #    假设 stride[0] 是最大的缩放比例
+        # 检查父类是否正确初始化
         if not self.upconvs or not self.bn_relu:
-             raise ValueError("Parent DCA class was not initialized correctly. 'upconvs' or 'bn_relu' is missing.")
+            raise ValueError("Parent DCA class was not initialized correctly. 'upconvs' or 'bn_relu' is missing.")
+            
+        # 为 Query 准备专用的上采样和后处理模块
         self.query_upconv = self.upconvs[0]
         self.query_bn_relu = self.bn_relu[0]
 
-
     def forward(self, query, memory):
-        """
-        前向传播函数
-        query: 动作序列特征, 形状 [bs, seq_len, query_dim]
-        memory: 多尺度的场景特征, 一个包含多个特征图的元组/列表
-        """
-        # --- 1. 预处理 Memory 和 Query ---
-        # 对多尺度的 Memory (场景特征) 进行处理，得到 token 序列
-        mem_tokens = self.m_apply(memory, self.patch_avg)
+        # --- 存储原始序列长度，用于最终裁剪 ---
+        B, original_L, C = query.shape
+
+        # --- 优化 1: 自动填充以支持任意序列长度 ---
+        # 1. 计算下一个完美的平方数作为新的目标长度
+        target_L = math.ceil(math.sqrt(original_L)) ** 2
+        
+        # 2. 计算需要填充的长度
+        pad_len = target_L - original_L
+        
+        # 3. 如果需要，执行填充操作
+        if pad_len > 0:
+            # F.pad 在最后一个维度上操作，所以我们需要先 permute
+            # (B, L, C) -> (B, C, L)
+            query = query.permute(0, 2, 1)
+            # 在序列长度维度 (最后一个维度) 的末尾填充 0
+            query = F.pad(query, (0, pad_len))
+            # (B, C, L_padded) -> (B, L_padded, C)
+            query = query.permute(0, 2, 1)
+
+        # --- 错误根源修复: 强制检查并修正 memory 中每个张量的维度 ---
+        checked_memory = []
+        for mem_tensor in memory:
+            if mem_tensor.dim() == 3:
+                # 如果是 [B, H, W]，则在通道维度 unsqueeze
+                checked_memory.append(mem_tensor.unsqueeze(1)) # -> [B, 1, H, W]
+            elif mem_tensor.dim() == 4:
+                # 如果已经是 [B, C, H, W]，直接使用
+                checked_memory.append(mem_tensor)
+            else:
+                raise ValueError(f"Memory tensor has an unexpected shape: {mem_tensor.shape}")
+
+        # 1. 预处理 Memory 和 Query
+        mem_tokens = self.m_apply(checked_memory, self.patch_avg)
         mem_tokens = self.m_apply(mem_tokens, self.avg_map)
 
-        # 对单尺度的 Query (动作特征) 进行处理
-        # 首先需要将 [bs, seq_len, C] -> [bs, C, H, W] 的图像格式
-        B, L, C = query.shape
-        H = W = int(L**0.5)
-        if H * W != L:
-            # 如果序列长度不是一个完美的平方数，会引发错误。
-            # 您的模型设计需要保证这一点。
-            # 例如，如果 latent_dim=512, 序列长度为 64, 则 H=W=8。
-            raise ValueError(f"Sequence length {L} is not a perfect square. Cannot reshape to a square image.")
+        # 现在 query 的长度 L 已经是完美的平方数
+        L = query.shape[1]
+        H = W = int(math.sqrt(L))
         query_reshaped = einops.rearrange(query, 'B (H W) C -> B C H W', H=H, W=W)
 
-        # 将 Query 也转换成与 memory tokens 格式一致的 token 序列
         query_tokens = self.query_patch_avg(query_reshaped)
         query_tokens = self.query_avg_map(query_tokens)
 
-        # --- 2. 执行交叉注意力 ---
-        # Q 来自 query_tokens, K 和 V 来自 mem_tokens
-        # 遍历每一个注意力块 (在您的配置中 n 通常为 1)
+        # 2. 执行交叉注意力
         for block in self.attention:
-            # 为 Query 和 Memory 分别进行归一化
-            # CCSABlock 中的 norm 层是 ModuleList，我们需要手动选择
-            # Query 是单尺度的，我们用第一个 norm 层
             q_norm = block.spatial_norm[0](query_tokens)
             mem_norm_list = block.m_apply(mem_tokens, block.spatial_norm)
-
-            # 用于生成 Key 和 Value 的源，由所有尺度的 memory 拼接而成
             kv_source = block.cat(*mem_norm_list)
-
-            # 构建交叉注意力的输入: [[Query, Key_Source, Value_Source]]
-            # 这里的输入格式是为 s_attention 模块准备的
             x_in_spatial = [[q_norm, kv_source, kv_source]]
-            
-            # s_attention 也是 ModuleList，我们只对 Query 进行计算，所以也只用第一个
-            att_out = block.s_attention[0](x_in_spatial[0]) # 直接传入列表元素
-            
-            # 残差连接
+            att_out = block.s_attention[0](x_in_spatial[0])
             query_tokens = query_tokens + att_out
-            
-            # (如果需要，也可以在这里加入通道交叉注意力，逻辑类似)
 
-        # --- 3. 后处理并返回 ---
-        # 此时的 query_tokens 是经过场景信息增强后的动作 tokens
-        # 将其变回 [B, C, H, W] 的图像格式
+        # 3. 后处理
         x = self.reshape(query_tokens)
-
-        # 上采样回原始分辨率
         x = self.query_upconv(x)
-
-        # 与原始的 query(reshaped) 进行残差连接
         x_out = x + query_reshaped
         x_out = self.query_bn_relu(x_out)
-
-        # 最后，重新变回 [B, L, C] 的序列格式
+        
+        # 将结果变回序列格式
         x_out = einops.rearrange(x_out, 'B C H W -> B (H W) C')
+        
+        # --- 关键: 裁剪掉之前为了凑成完美平方而填充的部分 ---
+        if pad_len > 0:
+            x_out = x_out[:, :original_L, :]
 
         return x_out
 
