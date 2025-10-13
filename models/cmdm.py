@@ -9,7 +9,7 @@ from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
-from models.DCA import DCA
+from models.DCA import CrossDCA
 
 
 @Model.register()
@@ -271,7 +271,9 @@ class CMDM(nn.Module):
             # 1. 准备 Query 序列 (同 trans_dec)
             x = torch.cat([time_emb, text_emb, x], dim=1)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
-            # ... (准备 x_mask) ...
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
 
             # 2. 先进行自注意力，处理动作序列的时间逻辑
             x = self.motion_self_attention(x, src_key_padding_mask=x_mask)
