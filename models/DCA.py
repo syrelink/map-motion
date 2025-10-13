@@ -463,88 +463,21 @@ class CrossAttentionCCSABlock(nn.Module):
             
         return x_out
 
-class CrossDCA(nn.Module):
-    def __init__(self,
-                 query_dim,
-                 memory_features, # e.g., [64, 128, 256, 512]
-                 strides=[8, 4, 2, 1],
-                 patch=28,
-                 n=1,
-                 channel_head=1,
-                 spatial_head=4,
-                 ):
-        super().__init__()
-        self.patch = patch
-        self.memory_features = memory_features
-
-        # --- 为 Memory (多尺度) 设置预处理模块 ---
-        self.mem_patch_avg = nn.ModuleList([PoolEmbedding(nn.AdaptiveAvgPool2d, patch) for _ in memory_features])
-        self.mem_avg_map = nn.ModuleList([
-            depthwise_projection(in_features=f, out_features=f, groups=f) for f in memory_features
-        ])
-
-        # --- 核心注意力模块 ---
-        # 使用我们新设计的 CrossAttentionCCSABlock
-        self.attention = nn.ModuleList([
-            CrossAttentionCCSABlock(
-                query_features=query_dim,
-                memory_features=memory_features,
-                channel_head=channel_head,
-                spatial_head=spatial_head)
-            for _ in range(n)])
-
-        # --- 为 Query (单尺度) 设置后处理模块 ---
-        # 只需要一个上采样层，将 patch 大小的特征图恢复到原始尺寸
-        # 注意：这里假设 query 的 H, W 和 memory 最大的特征图 H, W 相同
-        self.query_upconv = UpsampleConv(
-            in_features=query_dim,
-            out_features=query_dim,
-            scale=strides[0], # 使用最大的 stride 进行上采样
-            conv='conv'
-        )
-        self.query_bn_relu = nn.Sequential(nn.BatchNorm2d(query_dim), nn.ReLU())
-
-    def forward(self, query, memory):
-        # query: 动作序列特征, [B, L, C_q]
-        # memory: 多尺度场景特征, tuple of [B, C, H, W]
-
-        # 1. 预处理 Memory
-        mem_tokens = [self.mem_patch_avg[i](mem) for i, mem in enumerate(memory)]
-        mem_tokens = [self.mem_avg_map[i](mem) for i, mem in enumerate(mem_tokens)]
-
-        # 2. 预处理 Query (只需要转换格式，不需要下采样)
-        B, L, C = query.shape
-        H = W = int(L**0.5)
-        query_reshaped = einops.rearrange(query, 'B (H W) C -> B C H W', H=H, W=W)
-        # 将其转换成和memory tokens一样的token序列格式
-        query_tokens = einops.rearrange(query, 'B L C -> B C L 1') # 变成伪4D张量
-        query_tokens = nn.AdaptiveAvgPool2d((self.patch, self.patch))(query_tokens)
-        query_tokens = einops.rearrange(query_tokens, 'B C H W -> B (H W) C')
-
-        # 3. 执行交叉注意力循环
-        att_query_tokens = query_tokens
-        for block in self.attention:
-            att_query_tokens = block(att_query_tokens, mem_tokens)
-        
-        # 4. 后处理 Query
-        x = einops.rearrange(att_query_tokens, 'B (H W) C -> B C H W', H=self.patch)
-        x = self.query_upconv(x)
-        
-        # 5. 残差连接并返回
-        x_out = x + query_reshaped
-        x_out = self.query_bn_relu(x_out)
-        
-        # 变回序列格式
-        x_out = einops.rearrange(x_out, 'B C H W -> B (H W) C')
-        
-        return x_out
+class CrossDCA(DCA):  # 明确继承自 DCA 类
     def __init__(self, features, query_dim, **kwargs):
-        # 调用父类(DCA)的构造函数，但传入的features只用于构建memory相关的部分
+        """
+        用于交叉注意力的DCA模块。
+        - features: memory (场景特征) 的多尺度特征维度列表。
+        - query_dim: query (动作序列) 的特征维度。
+        - **kwargs: 传递给父类DCA的其他参数 (如 patch, strides, n, channel_head等)。
+        """
+        # 1. 调用父类(DCA)的构造函数
+        #    它会创建 self.patch_avg, self.avg_map, self.attention, self.upconvs 等模块
+        #    这些模块都是为处理多尺度的 memory (场景特征) 准备的
         super().__init__(features=features, **kwargs)
-        
-        # --- 核心改造 ---
-        # 原始DCA的patch_avg是为memory准备的，我们需要为Query也准备一个
-        # 因为Query(动作序列)只有一个尺度，所以我们只需要一个
+
+        # 2. 为单尺度的 Query (动作序列) 创建专属的处理模块
+        #    因为Query只有一个尺度，所以我们只需要一个
         self.query_patch_avg = PoolEmbedding(
             pooling=nn.AdaptiveAvgPool2d,
             patch=self.patch
@@ -553,78 +486,81 @@ class CrossDCA(nn.Module):
             in_features=query_dim,
             out_features=query_dim,
             groups=query_dim,
-            # 确保其他参数与DCA中的设置一致
             kernel_size=(1, 1),
             padding=(0, 0),
         )
-        # -----------------
+        
+        # 3. 为Query准备上采样和后处理模块
+        #    父类的upconvs和bn_relu是ModuleList，不适合单尺度的Query
+        #    我们在这里创建独立的模块
+        self.query_upconv = self.upconvs[0] # 复用第一个尺度的上采样层
+        self.query_bn_relu = self.bn_relu[0] # 复用第一个尺度的BN和ReLU层
+
 
     def forward(self, query, memory):
-        # query: 动作序列特征 x, 形状 [bs, seq_len, query_dim]
-        # memory: 多尺度的场景特征 cont_emb, 一个包含4个特征图的元组或列表
-        
-        # --- 1. 准备 Query 和 Memory ---
-        # 对多尺度的 Memory (场景特征) 进行处理 (这部分逻辑和您原来DCA的代码一样)
-        mem_x = self.m_apply(memory, self.patch_avg)
-        mem_x = self.m_apply(mem_x, self.avg_map)
-        
+        """
+        query: 动作序列特征, 形状 [bs, seq_len, query_dim]
+        memory: 多尺度的场景特征, 一个包含多个特征图的元组/列表
+        """
+        # --- 1. 预处理 Memory 和 Query ---
+        # 对多尺度的 Memory (场景特征) 进行处理 (这部分逻辑和父类DCA一样)
+        mem_tokens = self.m_apply(memory, self.patch_avg)
+        mem_tokens = self.m_apply(mem_tokens, self.avg_map)
+
         # 对单尺度的 Query (动作特征) 进行处理
         # 首先需要将 [bs, seq_len, C] -> [bs, C, H, W] 的格式
         B, L, C = query.shape
-        # 假设序列长度可以开方得到一个方形的patch，如果不行需要padding或调整patch大小
-        H = W = int(L**0.5) 
+        H = W = int(L**0.5)
         if H * W != L:
-            # 如果序列长度不是平方数，这里需要更复杂的处理，例如padding
-            # 为简化起见，我们先假设它是
+            # 如果序列长度不是一个完美的平方数，需要更鲁棒的处理
+            # 这里暂时假设它是，或者您的模型设计保证了这一点
             pass
         query_reshaped = einops.rearrange(query, 'B (H W) C -> B C H W', H=H, W=W)
-        
-        # 将Query也转换成token序列的形式
-        q_x = self.query_patch_avg(query_reshaped)
-        q_x = self.query_avg_map(q_x)
-        
-        # --- 2. 执行注意力 ---
-        # 这是核心区别：现在Q来自query，而K和V的来源是memory
+
+        # 将Query也转换成与memory tokens格式一致的token序列
+        query_tokens = self.query_patch_avg(query_reshaped)
+        query_tokens = self.query_avg_map(query_tokens)
+
+        # --- 2. 执行交叉注意力 ---
+        # Q 来自 query_tokens, K和V 来自 mem_tokens
+        # 遍历每一个注意力块 (通常n=1)
         for block in self.attention:
-            # 我们需要稍微修改一下CCSABlock的逻辑，或者在这里手动构建输入
-            # 这里我们选择手动构建，以避免修改您已有的CCSABlock
-            
-            # 分别对 q 和 mem 进行归一化
-            x_c_q_list = block.m_apply([q_x], block.spatial_norm)
-            x_c_mem_list = block.m_apply(mem_x, block.spatial_norm)
-            
+            # 归一化 Query 和 Memory
+            # 注意：CCSABlock中的norm层是ModuleList，我们需要手动选择
+            q_norm = block.spatial_norm[0](query_tokens) # 使用第一个norm层
+            mem_norm_list = block.m_apply(mem_tokens, block.spatial_norm)
+
             # 用于生成Key和Value的源，由所有尺度的memory拼接而成
-            kv_source = block.cat(*x_c_mem_list)
-            
+            kv_source = block.cat(*mem_norm_list)
+
             # 构建交叉注意力的输入: [[Query, Key_Source, Value_Source]]
-            # 这里的输入格式是为 s_attention 准备的
-            x_in_spatial = [[x_c_q_list[0], kv_source, kv_source]]
+            x_in_spatial = [[q_norm, kv_source, kv_source]]
+            # 执行空间交叉注意力 (s_attention也是ModuleList)
+            # 输出只有一个元素，因为输入只有一个query
+            att_out = block.m_apply(x_in_spatial, block.s_attention)[0]
             
-            # 执行空间交叉注意力
-            q_x = block.m_apply(x_in_spatial, block.s_attention)[0] # 输出只有一个元素
+            # 残差连接
+            query_tokens = query_tokens + att_out
             
-            # （可选）如果也想进行通道交叉注意力，可以类似地构建输入
-            # x_in_channel = [[x_c_q_list[0], kv_source, kv_source]]
-            # q_x_c = block.m_apply(x_in_channel, block.c_attention)[0]
-            # q_x = q_x + q_x_c
+            # (可选) 您也可以在这里加入通道交叉注意力
+            # q_norm_c = block.channel_norm[0](query_tokens)
+            # ... 类似逻辑 ...
 
         # --- 3. 后处理并返回 ---
-        # 此时的q_x是经过场景信息增强后的动作token
+        # 此时的 query_tokens 是经过场景信息增强后的动作tokens
         # 将其变回 [B, C, H, W] 的图像格式
-        x = self.reshape(q_x)
-        
+        x = self.reshape(query_tokens)
+
         # 上采样回原始分辨率
-        # 注意：这里的upconvs可能需要为query单独设计，因为只有一个尺度
-        # 为简化，我们假设第一个upconvs就是为query准备的
-        x = self.upconvs[0](x)
-        
-        # 残差连接：将原始的query(reshaped)与经过场景增强后的结果相加
-        x_out = x + query_reshaped 
-        x_out = self.bn_relu[0](x_out) # 使用第一个bn_relu
-        
+        x = self.query_upconv(x)
+
+        # 与原始的query(reshaped)进行残差连接
+        x_out = x + query_reshaped
+        x_out = self.query_bn_relu(x_out)
+
         # 最后，重新变回 [B, L, C] 的序列格式
         x_out = einops.rearrange(x_out, 'B C H W -> B (H W) C')
-        
+
         return x_out
 
 if __name__ == '__main__':

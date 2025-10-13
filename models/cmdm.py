@@ -157,7 +157,7 @@ class CMDM(nn.Module):
             #    实例化我们刚刚编写的 CrossDCA 模块。
             self.dca_cross_attention = CrossDCA(
                 query_dim=self.latent_dim,
-                memory_features=self.planes, # 来自 contact_model.planes
+                features=self.planes, # 来自 contact_model.planes
                 # 以下参数需要您在配置文件中定义
                 patch=cfg.dca.patch,
                 strides=cfg.dca.strides,
