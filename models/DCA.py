@@ -475,6 +475,7 @@ class CrossDCA(nn.Module):
                  ):
         super().__init__()
         self.patch = patch
+        self.memory_features = memory_features
 
         # --- 为 Memory (多尺度) 设置预处理模块 ---
         self.mem_patch_avg = nn.ModuleList([PoolEmbedding(nn.AdaptiveAvgPool2d, patch) for _ in memory_features])
