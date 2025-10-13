@@ -30,3 +30,20 @@ num_layers: [1,1,1,1,1]
 num_heads: 8
 dropout: 0.1
 dim_feedforward: 1024
+
+
+arch: 'trans_DCA' 
+# 2. 保留共享参数：以下参数对于我们新架构中的自注意力模块仍然是必需的
+latent_dim: 512
+mask_motion: true
+num_layers: [1, 1, 1, 1, 1]  # 自注意力模块的总深度将是 sum(num_layers) = 5
+num_heads: 8
+dropout: 0.1
+dim_feedforward: 1024
+# 3. 新增 dca 配置项：为我们新的 CrossDCA 模块提供专属的超参数
+dca:
+  patch: 28          # 对应 DCA.py 中的 patch 参数，定义了特征图被下采样到的中间尺寸
+  strides: [8, 4, 2, 1]  # 对应 DCA.py 中的 strides，用于上采样恢复分辨率
+  n_blocks: 1        # 对应 CrossDCA 中的 n 参数，代表堆叠的注意力块数量
+  channel_head: 1    # 对应 CrossDCA 中 ChannelAttention 的 n_heads 参数
+  spatial_head: 4    # 对应 CrossDCA 中 SpatialAttention 的 n_heads 参数

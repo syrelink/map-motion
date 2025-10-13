@@ -49,6 +49,9 @@ class CMDM(nn.Module):
         elif self.arch == 'trans_dec':
             # Decoder架构需要将场景信息作为memory，需要更复杂的编码器结构
             SceneMapModule = SceneMapEncoderDecoder
+        elif self.arch == 'trans_DCA':
+            # Decoder架构需要将场景信息作为memory，需要更复杂的编码器结构
+            SceneMapModule = SceneMapEncoderDecoder
         else:
             raise NotImplementedError
         self.contact_encoder = SceneMapModule(
@@ -93,7 +96,7 @@ class CMDM(nn.Module):
                 enable_nested_tensor=False,
                 num_layers=sum(cfg.num_layers),  # 总层数
             )
-        elif self.arch == ' ':
+        elif self.arch == 'trans_dec':
             # 如果是Decoder架构，则需要手动搭建自注意力和交叉注意力的交替结构
             self.self_attn_layers = nn.ModuleList()
             self.kv_mappling_layers = nn.ModuleList()
