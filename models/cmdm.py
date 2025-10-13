@@ -269,25 +269,37 @@ class CMDM(nn.Module):
             # 丢弃条件信息的输出部分，只保留动作部分的输出
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
-        # ==================== 新的 trans_DCA 前向传播逻辑 ====================
+# ==================== 修正后的 trans_DCA 前向传播逻辑 ====================
         elif self.arch == 'trans_DCA':
             # 1. 准备 Query 序列 (同 trans_dec)
+            #    将时间、文本和动作序列拼接在一起
             x = torch.cat([time_emb, text_emb, x], dim=1)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+            
             x_mask = None
             if self.mask_motion:
                 x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
 
-            # 2. 先进行自注意力，处理动作序列的时间逻辑
+            # 2. 先进行自注意力
+            #    让包括条件在内的所有 token 互相交互，处理整体的时间/上下文逻辑
             x = self.motion_self_attention(x, src_key_padding_mask=x_mask)
 
-            # 3. 再进行交叉注意力，让动作序列“查阅”多尺度的场景地图
-            #    cont_emb 是 SceneMapEncoderDecoder 输出的特征列表
-            x = self.dca_cross_attention(query=x, memory=cont_emb)
-
-            # 4. 丢弃条件信息的输出部分 (同 trans_dec)
+            # --- 关键修正：在交叉注意力之前，分离出动作序列 ---
+            
+            # 3. 分离出需要与场景进行交叉注意的动作部分
+            #    只有动作序列 x 才需要去查询场景地图 cont_emb
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
-            x = x[:, non_motion_token:, :]
+            motion_x = x[:, non_motion_token:, :]
+
+            # 4. 对动作序列执行交叉注意力
+            #    现在传入 dca_cross_attention 的是纯粹的 motion_x，
+            #    其序列长度是固定的 motion_seq_len，可以被设计成一个完美的平方数。
+            #    cont_emb 是 SceneMapEncoderDecoder 输出的特征列表
+            attended_motion_x = self.dca_cross_attention(query=motion_x, memory=cont_emb)
+
+            # 5. 直接返回经过场景增强后的动作序列
+            #    因为我们已经提前分离了动作序列，所以不再需要最后一步的切片操作。
+            x = attended_motion_x
         # =================================================================
         else:
             raise NotImplementedError
