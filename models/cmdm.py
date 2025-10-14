@@ -9,7 +9,7 @@ from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
-from MambaVision import MotionMambaMixer, Attention
+from models.MambaVision import MotionMambaMixer, Attention
 from timm.models.layers import DropPath, Mlp
 
 
