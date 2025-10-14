@@ -12,7 +12,7 @@ class MotionMambaMixer(nn.Module):
     这个模块是 MambaVisionMixer 的直接改编版，专为 (B, Seq_Len, Dim) 的1D序列数据设计。
     它实现了论文中描述的双分支（SSM + 非SSM）和拼接融合的结构。
     """
-    def __init__(self, d_model, d_state=16, d_conv=4, expand=2, dt_rank="auto", **kwargs):
+    def __init__(self, d_model, d_state=16, d_conv=3, expand=2, dt_rank="auto", **kwargs):
         super().__init__()
         self.d_model = d_model
         self.d_state = d_state
