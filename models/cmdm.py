@@ -9,7 +9,8 @@ from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
-from models.DCA import CrossDCA
+from MambaVision import MotionMambaMixer, Attention
+from timm.models.layers import DropPath, Mlp
 
 
 @Model.register()
@@ -116,7 +117,6 @@ class CMDM(nn.Module):
                         num_layers=n,
                     )
                 )
-
                 # 2. 交叉注意力层 (Cross-Attention)
                 if i != len(self.num_layers) - 1:  # 最后一层之后不需要交叉注意力
                     # 将场景特征映射为K和V
@@ -138,8 +138,48 @@ class CMDM(nn.Module):
                         )
                     )
 # ==================== 新增的 trans_DCA 架构 ====================
-        # elif self.arch == 'trans_DCA':
-            
+        elif self.arch == 'trans_DCA':
+            # --- DCA 架构初始化 ---
+            # 本架构深度借鉴 MambaVision，采用 Mamba 和 Transformer 的混合设计。
+            # 核心策略是 "Mamba First, Transformer Last"，即在网络的浅层使用高效的 Mamba 捕捉局部动态，
+            # 在深层使用 Transformer 捕捉全局长距离依赖，这被证明是性能最佳的组合。
+
+            # 我们将构建一个统一的层列表，每个层都是一个完整的块 (Mixer -> MLP)。
+            # 为了实现这一点，我们需要为每个块的组件分别创建 ModuleList。
+            self.dca_norm1s = nn.ModuleList()      # 每个块的第一个 LayerNorm
+            self.dca_mixers = nn.ModuleList()      # 存储 MambaMixer 或 Attention
+            self.dca_norm2s = nn.ModuleList()      # 每个块的第二个 LayerNorm
+            self.dca_mlps = nn.ModuleList()        # 每个块的 MLP (前馈网络)
+            self.dca_drop_paths = nn.ModuleList()  # 每个块的 DropPath
+
+            # 计算随机深度 (Stochastic Depth) 的衰减率，用于 DropPath
+            total_layers = sum(self.num_layers)
+            dpr = [x.item() for x in torch.linspace(0, cfg.dropout, total_layers)]  # 线性衰减
+
+            # MambaVision 的黄金法则：确定 Mamba 和 Transformer 的切换点
+            # 我们将总层数的一半用作 Mamba，一半用作 Transformer。
+            num_mamba_blocks = total_layers // 2
+
+            # 循环构建每一层
+            for i in range(total_layers):
+                # 1. 添加 LayerNorms
+                self.dca_norm1s.append(nn.LayerNorm(self.latent_dim))
+                self.dca_norm2s.append(nn.LayerNorm(self.latent_dim))
+                
+                # 2. 根据当前层索引 i，决定使用 Mamba 还是 Transformer
+                if i < num_mamba_blocks:
+                    # 前半部分层：使用我们为动作序列定制的 MotionMambaMixer
+                    mixer = MotionMambaMixer(d_model=self.latent_dim)
+                else:
+                    # 后半部分层：使用标准的自注意力模块 (Transformer)
+                    mixer = Attention(dim=self.latent_dim, num_heads=cfg.num_heads)
+                self.dca_mixers.append(mixer)
+
+                # 3. 添加 MLP (前馈网络)
+                self.dca_mlps.append(Mlp(in_features=self.latent_dim, hidden_features=int(self.latent_dim * 4), act_layer=nn.GELU, drop=cfg.dropout))
+
+                # 4. 添加 DropPath
+                self.dca_drop_paths.append(DropPath(dpr[i]) if dpr[i] > 0. else nn.Identity())
 # =============================================================
         else:
             raise NotImplementedError
@@ -245,9 +285,33 @@ class CMDM(nn.Module):
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
 # ==================== 修正后的 trans_DCA 前向传播逻辑 ====================
-        # elif self.arch == 'trans_DCA':
+        elif self.arch == 'trans_DCA':
+            # --- DCA 前向传播 ---
+            # 1. 准备输入序列 (与 trans_dec 相同)
+            # 将时间、文本和带噪动作拼接成一个长序列
+            x = torch.cat([time_emb, text_emb, x], dim=1)
+            # 添加位置编码
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            # 准备 mask (与 trans_dec 相同)
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
             
-        # =================================================================
+            # 2. 逐层通过 DCA 模块
+            # 数据流遵循标准的 Pre-Norm 结构: x = x + DropPath(Module(Norm(x)))
+            # 这与 mamba_vision.py 中的 Block 实现一致。
+            for i in range(len(self.dca_mixers)):
+                # 第一个残差连接：Mixer (Mamba 或 Attention)
+                x = x + self.dca_drop_paths[i](self.dca_mixers[i](self.dca_norm1s[i](x)))
+                
+                # 第二个残差连接：MLP
+                x = x + self.dca_drop_paths[i](self.dca_mlps[i](self.dca_norm2s[i](x)))
+
+            # 3. 丢弃条件信息的输出部分，只保留动作部分的输出 (与 trans_dec 相同)
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+# =================================================================
         else:
             raise NotImplementedError
 
