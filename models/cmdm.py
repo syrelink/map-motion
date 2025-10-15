@@ -11,6 +11,7 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
 from utils.misc import compute_repr_dimesion
 from models.MambaVision import MotionMambaMixer, Attention
 from timm.models.layers import DropPath, Mlp
+from models.motion_vrwkv import *
 
 
 @Model.register()
@@ -181,6 +182,29 @@ class CMDM(nn.Module):
                 # 4. 添加 DropPath
                 self.dca_drop_paths.append(DropPath(dpr[i]) if dpr[i] > 0. else nn.Identity())
 # =============================================================
+# ==================== 新增的 trans_wkv 架构 ====================
+        elif self.arch == 'trans_wkv':
+            # --- WKV 架构初始化 ---
+            # 本架构基于 Vision-RWKV，用我们定制的 MotionWKVBlock 
+            # 彻底取代了原有的自注意力和交叉注意力层。
+            # 这样做旨在获得线性计算复杂度，从而在处理长动作序列时获得巨大的效率优势。
+
+            self.wkv_layers = nn.ModuleList()
+            
+            # 计算随机深度 (Stochastic Depth) 的衰减率
+            total_layers = sum(self.num_layers)
+            dpr = [x.item() for x in torch.linspace(0, cfg.dropout, total_layers)]
+
+            # 循环构建每一层 MotionWKVBlock
+            for i in range(total_layers):
+                self.wkv_layers.append(
+                    MotionWKVBlock(
+                        dim=self.latent_dim,
+                        mlp_ratio=4., # FFN的扩展比例，通常为4
+                        drop_path=dpr[i]
+                    )
+                )
+# =================================================================
         else:
             raise NotImplementedError
 
@@ -310,6 +334,27 @@ class CMDM(nn.Module):
 
             # 3. 丢弃条件信息的输出部分，只保留动作部分的输出 (与 trans_dec 相同)
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+# =================================================================
+# ==================== 新增的 trans_wkv 前向传播逻辑 ====================
+        elif self.arch == 'trans_wkv':
+            # --- WKV 前向传播 ---
+            # 1. 准备输入序列 (与 trans_dec/trans_DCA 相同)
+            # 将时间、文本、场景接触和带噪动作全部拼接成一个长序列
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
+            # 添加位置编码
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            # WKV 架构不需要 mask，但我们保留它以防未来扩展
+            x_mask = None # (可选)
+            
+            # 2. 逐层通过 WKV 模块
+            # 每个 MotionWKVBlock 都是一个完整的处理单元，包含了 Motion-Mix 和 Channel-Mix
+            for block in self.wkv_layers:
+                x = block(x)
+
+            # 3. 丢弃条件信息的输出部分，只保留动作部分的输出
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_emb.shape[1]
             x = x[:, non_motion_token:, :]
 # =================================================================
         else:
