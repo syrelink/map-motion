@@ -33,7 +33,6 @@ text_model:
 
 
 arch: 'trans_DCA' 
-
 # 1. 保留共享参数：这些对于新架构中的自注意力模块仍然是必需的
 latent_dim: 512
 mask_motion: true
@@ -41,7 +40,6 @@ num_layers: [1, 1, 1, 1, 1]  # 自注意力模块的总深度将是 sum(num_laye
 num_heads: 8
 dropout: 0.1
 dim_feedforward: 1024
-
 # 2. 新增并修正 dca 配置项：为 CrossDCA 模块提供专属的超参数
 dca:
   patch: 28          # 特征图被下采样到的中间尺寸

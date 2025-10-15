@@ -21,6 +21,11 @@ from mmcls_custom.models.utils import DropPath
 logger = logging.getLogger(__name__)
 
 
+# --- CUDA 加速模块 ---
+# 论文中提到，为了达到RNN形式的高效率，必须在CUDA层面重写算子 。
+# 这部分代码通过JIT（即时编译）加载一个自定义的 C++/CUDA 扩展，
+# 该扩展实现了高效的双向WKV（Bi-WKV）前向和后向传播。
+
 from torch.utils.cpp_extension import load
 wkv_cuda = load(name="bi_wkv", sources=["mmcls_custom/models/backbones/cuda_new/bi_wkv.cpp", "mmcls_custom/models/backbones/cuda_new/bi_wkv_kernel.cu"],
                 verbose=True, extra_cuda_cflags=['-res-usage', '--maxrregcount 60', '--use_fast_math', '-O3', '-Xptxas -O3', '-gencode arch=compute_86,code=sm_86'])

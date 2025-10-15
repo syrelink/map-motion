@@ -52,8 +52,9 @@ class CMDM(nn.Module):
             # Decoder架构需要将场景信息作为memory，需要更复杂的编码器结构
             SceneMapModule = SceneMapEncoderDecoder
         elif self.arch == 'trans_DCA':
-            # Decoder架构需要将场景信息作为memory，需要更复杂的编码器结构
             SceneMapModule = SceneMapEncoderDecoder
+        elif self.arch == 'trans_wkv':
+            SceneMapModule = SceneMapEncoder
         else:
             raise NotImplementedError
         self.contact_encoder = SceneMapModule(
