@@ -55,7 +55,6 @@ class CMDM(nn.Module):
             SceneMapModule = SceneMapEncoderDecoder
         elif self.arch == 'trans_wkv':
             SceneMapModule = SceneMapEncoder
-            # 定义一个线性层作为“适配器”，将场景特征维度映射到Transformer的内部维度
             self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
         else:
             raise NotImplementedError
@@ -316,7 +315,7 @@ class CMDM(nn.Module):
             # --- DCA 前向传播 ---
             # 1. 准备输入序列 (与 trans_dec 相同)
             # 将时间、文本和带噪动作拼接成一个长序列
-            x = torch.cat([time_emb, text_emb, x], dim=1)
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
             # 添加位置编码
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
 
@@ -336,16 +335,13 @@ class CMDM(nn.Module):
                 x = x + self.dca_drop_paths[i](self.dca_mlps[i](self.dca_norm2s[i](x)))
 
             # 3. 丢弃条件信息的输出部分，只保留动作部分的输出 (与 trans_dec 相同)
-            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+             # Slicing时也要考虑cont_emb
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
             x = x[:, non_motion_token:, :]
 # =================================================================
 # ==================== 新增的 trans_wkv 前向传播逻辑 ====================
         elif self.arch == 'trans_wkv':
             # --- WKV 前向传播 ---
-            # ++ 在拼接前，使用适配器将场景特征的维度进行转换 ++
-            # 假设 cont_emb 是 [bs, N, 256] -> 转换后是 [bs, N, 512]
-            cont_emb = self.contact_adapter(cont_emb)
-
             # 1. 准备输入序列 (与 trans_dec/trans_DCA 相同)
             # 将时间、文本、场景接触和带噪动作全部拼接成一个长序列
             x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
