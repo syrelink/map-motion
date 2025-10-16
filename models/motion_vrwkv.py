@@ -4,108 +4,167 @@
 
 import torch
 import torch.nn as nn
-import torch.nn.functional as F
-from timm.models.layers import Mlp, DropPath, to_2tuple, trunc_normal_
+from torch.utils.cpp_extension import load
 
-# 核心：为1D时序数据改编的 Bi-WKV 模块 (纯 PyTorch 实现)
-class Motion_BiWKV(nn.Module):
-    def __init__(self, embed_dim):
+# --- 关键部分 1: 加载高性能 CUDA 内核 ---
+# 这是 RWKV 实现线性复杂度和高效率的核心。
+# 它通过即时编译(JIT)加载一个自定义的 C++/CUDA 扩展，用于执行 WKV 计算。
+# 请确保您的环境中已安装 C++ 和 CUDA 工具链，并且源文件路径正确。
+try:
+    wkv_cuda = load(name="bi_wkv", 
+                    sources=["models/cuda/bi_wkv.cpp", "models/cuda/bi_wkv_kernel.cu"],
+                    verbose=True, extra_cuda_cflags=['-res-usage', '--maxrregcount 60', '--use_fast_math', '-O3', '-Xptxas -O3', '-gencode arch=compute_80,code=sm_80']) # 您可以根据您的GPU架构修改 sm_80
+
+    class WKV(torch.autograd.Function):
+        @staticmethod
+        def forward(ctx, w, u, k, v):
+            ctx.save_for_backward(w, u, k, v)
+            y = wkv_cuda.bi_wkv_forward(w.float(), u.float(), k.float(), v.float())
+            return y.to(w.dtype)
+
+        @staticmethod
+        def backward(ctx, gy):
+            w, u, k, v = ctx.saved_tensors
+            gw, gu, gk, gv = wkv_cuda.bi_wkv_backward(w.float(), u.float(), k.float(), v.float(), gy.float())
+            return gw.to(w.dtype), gu.to(w.dtype), gk.to(w.dtype), gv.to(w.dtype)
+
+    def RUN_CUDA(w, u, k, v):
+        return WKV.apply(w, u, k, v)
+
+except Exception as e:
+    print(f"警告: CUDA WKV 内核加载失败: {e}")
+    print("模型将回退到效率较低的纯 PyTorch 实现 (如果提供)。")
+    RUN_CUDA = None # 如果加载失败，则设置为空
+
+# --- 关键部分 2: 1D 时序位移函数 ---
+# 原始的 q_shift 是为2D图像设计的。我们将其简化为1D时序位移。
+# 它的作用是让当前时间步的 token 可以看到上一个时间步的信息，这是信息混合的关键。
+def temporal_shift(x):
+    """
+    对 (B, T, C) 的序列在时间维度 T 上进行位移。
+    """
+    B, T, C = x.size()
+    prev_x = torch.zeros_like(x)
+    prev_x[:, 1:, :] = x[:, :T-1, :]
+    return prev_x
+
+# --- 关键部分 3: WKV 模块 ---
+# 我们将原始的 SpatialMix 和 ChannelMix 概念，统一改造并封装到 MotionWKVBlock 中。
+
+class MotionWKV_TokenMix(nn.Module):
+    """
+    Token-Mixing 模块 (等价于 Attention)。
+    它负责在不同时间步的 token 之间混合信息。
+    """
+    def __init__(self, n_embd, n_layer, layer_id):
         super().__init__()
-        self.embed_dim = embed_dim
-        # 这些是 RWKV 架构的核心可学习参数
-        self.w = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        self.u = nn.Parameter(torch.zeros(1, 1, embed_dim))
-        
-    def forward(self, r, k, v):
-        # r, k, v 的形状: (B, T, C)
-        B, T, C = r.shape
-        r = r.sigmoid()
-        
-        # 将绝对位置偏置转换为相对偏置
-        t = torch.arange(T, device=r.device).reshape(1, T, 1)
-        w = self.w.exp() * -1
-        w = w * (T - 1 - t) / (T - 1) # Bounded exponential decay
+        self.layer_id = layer_id
+        self.n_layer = n_layer
+        self.n_embd = n_embd
 
-        p = torch.einsum('btc, blc -> btlc', k, w)
-        p = p - p.amax(dim=-1, keepdim=True).detach()
-        p = p.exp()
-        
-        # 前向扫描
-        p_f = p / (p.sum(dim=-1, keepdim=True) + 1e-6)
-        x_f = torch.einsum('btlc, blc -> btc', p_f, v)
-        
-        # 后向扫描 (通过翻转序列实现)
-        k_b = k.flip(dims=(1,))
-        v_b = v.flip(dims=(1,))
-        w_b = self.w.exp() * -1
-        w_b = w_b * t / (T - 1)
+        # WKV 的核心参数: decay, bonus, receptance, key, value
+        with torch.no_grad():
+            ratio_0_to_1 = layer_id / (n_layer - 1)
+            ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)
+            
+            decay_speed = torch.ones(n_embd)
+            for h in range(n_embd):
+                decay_speed[h] = -5 + 8 * (h / (n_embd - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
+            self.time_decay = nn.Parameter(decay_speed)
 
-        p_b = torch.einsum('btc, blc -> btlc', k_b, w_b)
-        p_b = p_b - p_b.amax(dim=-1, keepdim=True).detach()
-        p_b = p_b.exp()
-        
-        p_b_s = p_b / (p_b.sum(dim=-1, keepdim=True) + 1e-6)
-        x_b = torch.einsum('btlc, blc -> btc', p_b_s, v_b)
-        x_b = x_b.flip(dims=(1,))
-        
-        # 融合前向和后向结果
-        x = (x_f + x_b) / 2
-        return r * x
+            zigzag = (torch.tensor([(i + 1) % 3 - 1 for i in range(n_embd)]) * 0.5)
+            self.time_first = nn.Parameter(torch.ones(n_embd) * torch.math.log(0.3) + zigzag)
+            
+            x = torch.ones(1, 1, n_embd)
+            for i in range(n_embd):
+                x[0, 0, i] = i / n_embd
+            self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
+            self.time_mix_v = nn.Parameter(torch.pow(x, ratio_1_to_almost0) + 0.3 * ratio_0_to_1)
+            self.time_mix_r = nn.Parameter(torch.pow(x, 0.5 * ratio_1_to_almost0))
 
-# 核心：为1D时序数据改编的 Temporal-Shift (动作版的 Q-Shift)
-class TemporalShift(nn.Module):
-    def __init__(self, dim):
-        super().__init__()
-        self.dim = dim
-        # 可学习的混合参数，借鉴自 VRWKV 的 Q-Shift 设计
-        self.mu = nn.Parameter(torch.zeros(1, 1, dim))
+        self.key = nn.Linear(n_embd, n_embd, bias=False)
+        self.value = nn.Linear(n_embd, n_embd, bias=False)
+        self.receptance = nn.Linear(n_embd, n_embd, bias=False)
+        self.output = nn.Linear(n_embd, n_embd, bias=False)
 
     def forward(self, x):
-        B, T, C = x.shape
-        # 将特征沿通道维度切分为两半
-        x_past, x_future = x.chunk(2, dim=-1)
+        B, T, C = x.size()
         
-        # 时间平移：第一半向右移一帧（看过去），第二半向左移一帧（看未来）
-        x_past = F.pad(x_past, (0, 0, 1, 0))[:, :-1, :]
-        x_future = F.pad(x_future, (0, 0, 0, 1))[:, 1:, :]
-        
-        x_shifted = torch.cat([x_past, x_future], dim=-1)
-        
-        # 通过可学习参数 mu 与原始 x 混合
-        return x + self.mu * x_shifted
+        # 通过与上一个时间步的 x 混合，来生成 k, v, r
+        xx = temporal_shift(x)
+        xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
+        xv = x * self.time_mix_v + xx * (1 - self.time_mix_v)
+        xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
 
-# 核心：一个完整的 WKV 块，包含 Spatial-Mix (我们的 Motion-Mix) 和 Channel-Mix
+        k = self.key(xk)
+        v = self.value(xv)
+        r = self.receptance(xr)
+        sr = torch.sigmoid(r)
+        
+        # 使用高性能 CUDA 内核执行 WKV 计算
+        if RUN_CUDA is not None:
+            # 这里的 time_decay 和 time_first 经过调整以适应1D序列的性质
+            x = RUN_CUDA(self.time_decay, self.time_first, k, v)
+        else:
+            # 如果CUDA不可用，这里可以放一个纯PyTorch的备用实现（会慢很多且消耗显存）
+            raise NotImplementedError("CUDA WKV kernel is required for efficient execution.")
+
+        x = sr * x
+        x = self.output(x)
+        return x
+
+class MotionWKV_ChannelMix(nn.Module):
+    """
+    Channel-Mixing 模块 (等价于 FFN/MLP)。
+    它负责在每个 token 内部的特征通道之间混合信息。
+    """
+    def __init__(self, n_embd, n_layer, layer_id, mlp_ratio=4):
+        super().__init__()
+        self.layer_id = layer_id
+        self.n_layer = n_layer
+        
+        with torch.no_grad():
+            ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)
+            x = torch.ones(1, 1, n_embd)
+            for i in range(n_embd):
+                x[0, 0, i] = i / n_embd
+            self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
+            self.time_mix_r = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
+
+        hidden_sz = int(mlp_ratio * n_embd)
+        self.key = nn.Linear(n_embd, hidden_sz, bias=False)
+        self.receptance = nn.Linear(n_embd, n_embd, bias=False)
+        self.value = nn.Linear(hidden_sz, n_embd, bias=False)
+
+    def forward(self, x):
+        # 同样通过与上一时间步的x混合来增强表达能力
+        xx = temporal_shift(x)
+        xk = x * self.time_mix_k + xx * (1 - self.time_mix_k)
+        xr = x * self.time_mix_r + xx * (1 - self.time_mix_r)
+
+        k = self.key(xk)
+        k = torch.square(torch.relu(k)) # 使用 square-ReLU 激活
+        kv = self.value(k)
+        
+        x = torch.sigmoid(self.receptance(xr)) * kv
+        return x
+
 class MotionWKVBlock(nn.Module):
-    def __init__(self, dim, mlp_ratio=4., drop_path=0., act_layer=nn.GELU):
+    """
+    一个完整的 WKV 块。
+    这是将在您的 CMDM 模型中堆叠的基本单元。
+    结构: Pre-LN -> TokenMix -> Residual -> Pre-LN -> ChannelMix -> Residual
+    """
+    def __init__(self, dim, n_layer, layer_id, mlp_ratio=4., drop_path=0.):
         super().__init__()
         self.ln1 = nn.LayerNorm(dim)
-        
-        # 1. Motion-Mix 模块 (原论文的 Spatial-Mix)
-        self.motion_shift = TemporalShift(dim)
-        self.r_proj = nn.Linear(dim, dim)
-        self.k_proj = nn.Linear(dim, dim)
-        self.v_proj = nn.Linear(dim, dim)
-        self.out_proj = nn.Linear(dim, dim)
-        self.wkv = Motion_BiWKV(dim)
-        
-        self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
         self.ln2 = nn.LayerNorm(dim)
-        
-        # 2. Channel-Mix 模块 (即标准的前馈网络 FFN)
-        self.mlp = Mlp(in_features=dim, hidden_features=int(dim * mlp_ratio), act_layer=act_layer)
+        self.drop_path = nn.Identity() if drop_path == 0. else DropPath(drop_path)
 
-    def forward(self, x):
-        # Motion-Mix 分支
-        shortcut = x
-        x = self.ln1(x)
-        x_shifted = self.motion_shift(x)
-        r = self.r_proj(x_shifted)
-        k = self.k_proj(x_shifted)
-        v = self.v_proj(x_shifted)
-        x = self.wkv(r, k, v)
-        x = self.out_proj(x)
-        x = shortcut + self.drop_path(x)
+        self.att = MotionWKV_TokenMix(n_embd=dim, n_layer=n_layer, layer_id=layer_id)
+        self.ffn = MotionWKV_ChannelMix(n_embd=dim, n_layer=n_layer, layer_id=layer_id, mlp_ratio=mlp_ratio)
         
-        # Channel-Mix 分支
-        x = x + self.drop_path(self.mlp(self.ln2(x)))
+    def forward(self, x):
+        x = x + self.drop_path(self.att(self.ln1(x)))
+        x = x + self.drop_path(self.ffn(self.ln2(x)))
         return x
