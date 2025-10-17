@@ -22,31 +22,20 @@ text_model:
   version: 'ViT-B/32'
   max_length: 32
 
-## model architecture
-# arch: 'trans_enc'
-# latent_dim: 512
-# mask_motion: true
-# num_layers: [1,1,1,1,1]
-# num_heads: 8
-# dropout: 0.1
-# dim_feedforward: 1024
-
-
-arch: 'trans_DCA' 
-# 1. 保留共享参数：这些对于新架构中的自注意力模块仍然是必需的
+# model architecture
+arch: 'trans_enc'
 latent_dim: 512
 mask_motion: true
-num_layers: [1, 1, 1, 1, 1]  # 自注意力模块的总深度将是 sum(num_layers) = 5
+num_layers: [1,1,1,1,1]
 num_heads: 8
 dropout: 0.1
 dim_feedforward: 1024
-# 2. 新增并修正 dca 配置项：为 CrossDCA 模块提供专属的超参数
-dca:
-  patch: 28          # 特征图被下采样到的中间尺寸
-  strides: [8, 4, 2, 1]  # 用于上采样恢复分辨率，其长度(4)决定了下方列表的长度
-  n_blocks: 1        # 堆叠的注意力块数量
-  
-  # --- 关键修正 ---
-  # 因为有4个特征尺度(由strides的长度决定)，所以head参数也必须是长度为4的列表
-  channel_head: [1, 1, 1, 1]
-  spatial_head: [4, 4, 4, 4]
+
+# model architecture
+arch: 'trans_mamba'          # 关键改动：将架构名称更改为 'trans_mamba'
+latent_dim: 512              # 保持 Transformer 内部维度不变
+mask_motion: true            # 保持掩码设置不变
+num_layers: [2, 2, 2, 2]     # 关键改动：定义每个阶段的解码器块数量
+num_heads: 8                 # 保持多头注意力的头数不变
+dropout: 0.1                 # 保持 dropout 率不变
+dim_feedforward: 1024        # 保持前馈网络的维度不变

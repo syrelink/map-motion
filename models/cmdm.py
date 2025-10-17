@@ -10,7 +10,6 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
 from models.MotionMamba import *
-from timm.models.layers import DropPath, Mlp
 from models.motion_vrwkv import *
 
 
@@ -51,7 +50,7 @@ class CMDM(nn.Module):
         elif self.arch == 'trans_dec':
             # Decoder架构需要将场景信息作为memory，需要更复杂的编码器结构
             SceneMapModule = SceneMapEncoderDecoder
-        elif self.arch == 'trans_DCA':
+        elif self.arch == 'trans_mamba':
             SceneMapModule = SceneMapEncoderDecoder
         elif self.arch == 'trans_wkv':
             SceneMapModule = SceneMapEncoder
@@ -140,69 +139,27 @@ class CMDM(nn.Module):
                             batch_first=True,
                         )
                     )
-# ==================== 新增的 trans_DCA 架构 ====================
-        elif self.arch == 'trans_DCA':
-            # --- DCA 架构初始化 ---
-            # 本架构深度借鉴 MambaVision，采用 Mamba 和 Transformer 的混合设计。
-            # 核心策略是 "Mamba First, Transformer Last"，即在网络的浅层使用高效的 Mamba 捕捉局部动态，
-            # 在深层使用 Transformer 捕捉全局长距离依赖，这被证明是性能最佳的组合。
-
-            # 我们将构建一个统一的层列表，每个层都是一个完整的块 (Mixer -> MLP)。
-            # 为了实现这一点，我们需要为每个块的组件分别创建 ModuleList。
-            self.dca_norm1s = nn.ModuleList()      # 每个块的第一个 LayerNorm
-            self.dca_mixers = nn.ModuleList()      # 存储 MambaMixer 或 Attention
-            self.dca_norm2s = nn.ModuleList()      # 每个块的第二个 LayerNorm
-            self.dca_mlps = nn.ModuleList()        # 每个块的 MLP (前馈网络)
-            self.dca_drop_paths = nn.ModuleList()  # 每个块的 DropPath
-
-            # 计算随机深度 (Stochastic Depth) 的衰减率，用于 DropPath
+        elif self.arch == 'trans_mamba':
+            # 直接在这里定义 Trans-Mamba 的所有组件
             total_layers = sum(self.num_layers)
-            dpr = [x.item() for x in torch.linspace(0, cfg.dropout, total_layers)]  # 线性衰减
-
-            # MambaVision 的黄金法则：确定 Mamba 和 Transformer 的切换点
-            # 我们将总层数的一半用作 Mamba，一半用作 Transformer。
-            num_mamba_blocks = total_layers // 2
-
-            # 循环构建每一层
-            for i in range(total_layers):
-                # 1. 添加 LayerNorms
-                self.dca_norm1s.append(nn.LayerNorm(self.latent_dim))
-                self.dca_norm2s.append(nn.LayerNorm(self.latent_dim))
-                
-                # 2. 根据当前层索引 i，决定使用 Mamba 还是 Transformer
-                if i < num_mamba_blocks:
-                    # 前半部分层：使用我们为动作序列定制的 MotionMambaMixer
-                    mixer = MotionMambaMixer(d_model=self.latent_dim)
-                else:
-                    # 后半部分层：使用标准的自注意力模块 (Transformer)
-                    mixer = Attention(dim=self.latent_dim, num_heads=cfg.num_heads)
-                self.dca_mixers.append(mixer)
-
-                # 3. 添加 MLP (前馈网络)
-                self.dca_mlps.append(Mlp(in_features=self.latent_dim, hidden_features=int(self.latent_dim * 4), act_layer=nn.GELU, drop=cfg.dropout))
-
-                # 4. 添加 DropPath
-                self.dca_drop_paths.append(DropPath(dpr[i]) if dpr[i] > 0. else nn.Identity())
-# =============================================================
-# ==================== 新增的 trans_wkv 架构 ====================
-        elif self.arch == 'trans_wkv':
-            # --- WKV 架构初始化 ---
-            # 我们将在这里堆叠我们新设计的 MotionWKVBlock 模块。
-            self.wkv_layers = nn.ModuleList()
-            total_layers = sum(self.num_layers)
-            dpr = [x.item() for x in torch.linspace(0, cfg.dropout, total_layers)]
-
-            for i in range(total_layers):
-                self.wkv_layers.append(
-                    MotionWKVBlock(
-                        dim=self.latent_dim,
-                        n_layer=total_layers,
-                        layer_id=i,
-                        mlp_ratio=4., # FFN的扩展比例，通常为4
-                        drop_path=dpr[i]
-                    )
+            # 1. 解码器层堆栈
+            self.motion_decoder_layers = nn.ModuleList(
+                [TransMambaDecoderBlock(
+                    d_model=self.latent_dim,
+                    nhead=cfg.num_heads,
+                    dim_feedforward=cfg.dim_feedforward,
+                    dropout=cfg.dropout
+                ) for _ in range(total_layers)]
+            )
+            self.kv_mappling_layers = nn.ModuleList()
+            self.kv_mappling_layers.append(
+                nn.Sequential(
+                    nn.Linear(self.planes[-1 - i], self.latent_dim, bias=True),
+                    nn.LayerNorm(self.latent_dim),
                 )
-        # =================================================================
+            )
+
+
         else:
             raise NotImplementedError
 
@@ -306,54 +263,47 @@ class CMDM(nn.Module):
             # 丢弃条件信息的输出部分，只保留动作部分的输出
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
-# ==================== 修正后的 trans_DCA 前向传播逻辑 ====================
-        elif self.arch == 'trans_DCA':
-            # --- DCA 前向传播 ---
-            # 1. 准备输入序列 (与 trans_dec 相同)
-            # 将时间、文本和带噪动作拼接成一个长序列
-            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
-            # 添加位置编码
+        elif self.arch == 'trans_mamba':
+            
+            # 1. 准备Query序列 (与 trans_dec 完全一致)
+            #    直接在变量 'x' 上进行操作，不再使用 'x_seq'
+            x = torch.cat([time_emb, text_emb, x], dim=1)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
 
-            # 准备 mask (与 trans_dec 相同)
+            # 准备Query序列的掩码 (与 trans_dec 完全一致)
             x_mask = None
             if self.mask_motion:
-                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
-            
-            # 2. 逐层通过 DCA 模块
-            # 数据流遵循标准的 Pre-Norm 结构: x = x + DropPath(Module(Norm(x)))
-            # 这与 mamba_vision.py 中的 Block 实现一致。
-            for i in range(len(self.dca_mixers)):
-                # 第一个残差连接：Mixer (Mamba 或 Attention)
-                x = x + self.dca_drop_paths[i](self.dca_mixers[i](self.dca_norm1s[i](x)))
+                motion_mask = kwargs['x_mask']
+                x_mask = torch.cat([time_mask, text_mask, motion_mask], dim=1)
+
+            # 2. 逐层、分阶段去噪 (循环结构与 trans_dec 保持一致)
+            layer_idx_counter = 0
+            # 使用 'i' 作为循环变量，与 trans_dec 保持一致
+            for i in range(len(self.num_layers)):
+                num_blocks_in_stage = self.num_layers[i]
                 
-                # 第二个残差连接：MLP
-                x = x + self.dca_drop_paths[i](self.dca_mlps[i](self.dca_norm2s[i](x)))
+                # 2a. 准备当前阶段的场景 Memory 和 memory_mask (与 trans_dec 完全一致)
+                mem = cont_emb[i]  # memory
+                mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                if 'c_pc_mask' in kwargs:
+                    mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].unsqueeze(1).expand(-1, mem.shape[1]))
+                if 'c_pc_erase' in kwargs:
+                    mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
 
-            # 3. 丢弃条件信息的输出部分，只保留动作部分的输出 (与 trans_dec 相同)
-             # Slicing时也要考虑cont_emb
-            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
-            x = x[:, non_motion_token:, :]
-# =================================================================
-# ==================== 新增的 trans_wkv 前向传播逻辑 ====================
-        elif self.arch == 'trans_wkv':
-            # --- WKV 前向传播 ---
-            # cont_emb 已在公共区域通过 contact_adapter 统一维度。
+                # 2b. 将场景特征适配到正确维度 (与 trans_dec 中 kv_mappling_layers 的作用一致)
+                mem = self.kv_mappling_layers[i](mem)
+                
+                # 2c. 在当前阶段内，执行 N 个解码器块
+                #    这里的核心区别是：调用的是我们强大的 TransMambaDecoderBlock
+                for _ in range(num_blocks_in_stage):
+                    current_block = self.motion_decoder_layers[layer_idx_counter]
+                    # 将 x, mem 和对应的 mask 传入，并直接更新 x (与 trans_dec 完全一致)
+                    x = current_block(x, mem, x_mask=x_mask, mem_mask=mem_mask)
+                    layer_idx_counter += 1
             
-            # 1. 准备输入序列 (拼接所有条件和动作)
-            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
-            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
-            
-            # 2. 逐层通过 WKV 模块
-            # 每个 MotionWKVBlock 都是一个完整的处理单元。
-            # 这里的计算是线性复杂度的，从根本上解决了显存问题。
-            for block in self.wkv_layers:
-                x = block(x)
-
-            # 3. 丢弃条件信息的输出部分，只保留动作部分的输出
-            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_emb.shape[1]
-            x = x[:, non_motion_token:, :]
-        # =================================================================
+            # 3. 提取结果 (与 trans_dec 完全一致)
+            non_motion_token_count = time_emb.shape[1] + text_emb.shape[1]
+            x = x[:, non_motion_token_count:, :]
         else:
             raise NotImplementedError
 
