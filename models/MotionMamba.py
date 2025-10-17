@@ -87,8 +87,15 @@ class MambaMixer(nn.Module):
 
         A = -torch.exp(self.A_log.float())
         y = selective_scan_fn(
-            x, dt, A, B_val.contiguous(), C_val.contiguous(), self.D.float(),
-            z=None, delta_bias=self.dt_proj.bias.float(), delta_softplus=True,
+            x,              # u, shape (B, L, d_inner)
+            dt,             # delta, shape (B, d_inner, L)
+            A,              # A, shape (d_inner, d_state)
+            B_val.permute(0, 2, 1).contiguous(), # B, 修正后形状 (B, d_state, L)
+            C_val.permute(0, 2, 1).contiguous(), # C, 修正后形状 (B, d_state, L)
+            self.D.float(), # D, shape (d_inner)
+            z=None, 
+            delta_bias=self.dt_proj.bias.float(), 
+            delta_softplus=True,
             return_last_state=False
         )
         
