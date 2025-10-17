@@ -151,13 +151,15 @@ class CMDM(nn.Module):
                     dropout=cfg.dropout
                 ) for _ in range(total_layers)]
             )
-            self.kv_mappling_layers = nn.ModuleList()
-            self.kv_mappling_layers.append(
-                nn.Sequential(
-                    nn.Linear(self.planes[-1 - i], self.latent_dim, bias=True),
-                    nn.LayerNorm(self.latent_dim),
+            # 场景特征适配器，注意维度顺序
+            self.kv_mapping_layers = nn.ModuleList()
+            # self.planes 来自 cfg: [32, 64, 128, 256] 是从细到粗
+            # SceneMapEncoderDecoder 的输出 cont_emb 是 [x4, x3, x2, x1]，维度是从粗到细
+            # 所以我们需要反转 planes 列表来匹配
+            for feature_dim in reversed(self.planes):
+                self.kv_mapping_layers.append(
+                    nn.Sequential(nn.Linear(feature_dim, self.latent_dim), nn.LayerNorm(self.latent_dim))
                 )
-            )
 
 
         else:
@@ -291,7 +293,7 @@ class CMDM(nn.Module):
                     mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
 
                 # 2b. 将场景特征适配到正确维度 (与 trans_dec 中 kv_mappling_layers 的作用一致)
-                mem = self.kv_mappling_layers[i](mem)
+                mem = self.kv_mapping_layers[i](mem)
                 
                 # 2c. 在当前阶段内，执行 N 个解码器块
                 #    这里的核心区别是：调用的是我们强大的 TransMambaDecoderBlock
