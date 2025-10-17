@@ -22,14 +22,14 @@ text_model:
   version: 'ViT-B/32'
   max_length: 32
 
-# model architecture
-arch: 'trans_enc'
-latent_dim: 512
-mask_motion: true
-num_layers: [1,1,1,1,1]
-num_heads: 8
-dropout: 0.1
-dim_feedforward: 1024
+# # model architecture
+# arch: 'trans_enc'
+# latent_dim: 512
+# mask_motion: true
+# num_layers: [1,1,1,1,1]
+# num_heads: 8
+# dropout: 0.1
+# dim_feedforward: 1024
 
 # model architecture
 arch: 'trans_mamba'          # 关键改动：将架构名称更改为 'trans_mamba'
