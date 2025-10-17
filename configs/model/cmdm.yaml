@@ -22,20 +22,24 @@ text_model:
   version: 'ViT-B/32'
   max_length: 32
 
-# model architecture
-arch: 'trans_enc'
-latent_dim: 512
-mask_motion: true
-num_layers: [1,1,1,1,1]
-num_heads: 8
-dropout: 0.1
-dim_feedforward: 1024
-
 # # model architecture
-# arch: 'trans_mamba'          # 关键改动：将架构名称更改为 'trans_mamba'
-# latent_dim: 512              # 保持 Transformer 内部维度不变
-# mask_motion: true            # 保持掩码设置不变
-# num_layers: [2, 2, 2, 2]     # 关键改动：定义每个阶段的解码器块数量
-# num_heads: 8                 # 保持多头注意力的头数不变
-# dropout: 0.1                 # 保持 dropout 率不变
-# dim_feedforward: 1024        # 保持前馈网络的维度不变
+# arch: 'trans_enc'
+# latent_dim: 512
+# mask_motion: true
+# num_layers: [1,1,1,1,1]
+# num_heads: 8
+# dropout: 0.1
+# dim_feedforward: 1024
+
+
+arch: 'trans_mamba'          # <-- [修改] 改为 'trans_dec' 以匹配我们设计的混合解码器架构
+latent_dim: 512            # 模型/隐藏层维度
+mask_motion: true
+num_layers: [2, 2, 2, 2]     # <-- [建议] 建议增加层数，例如4个阶段，每个阶段2层，共8层
+num_heads: 8               # 注意力头数 (512 / 8 = 64, 是标准配置)
+dropout: 0.1               # Dropout 比率
+dim_feedforward: 2048      # <-- [建议] 通常设为 latent_dim 的4倍 (512 * 4 = 2048)
+
+# --- 新增参数 ---
+drop_path_rate: 0.1        # <-- [新增] 随机深度 (Stochastic Depth) 比率，可以提升稳定性和性能
+mamba_layer_indices: [0, 1, 4, 5] # <-- [新增] 指定使用 Mamba 的层。共8层(0-7)，这里让第0,1,4,5层使用 Mamba
