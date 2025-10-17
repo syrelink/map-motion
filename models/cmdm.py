@@ -140,28 +140,56 @@ class CMDM(nn.Module):
                         )
                     )
         elif self.arch == 'trans_mamba':
-            # 直接在这里定义 Trans-Mamba 的所有组件
-            total_layers = sum(self.num_layers)
-            # 1. 解码器层堆栈
-            self.motion_decoder_layers = nn.ModuleList(
-                [TransMambaDecoderBlock(
-                    d_model=self.latent_dim,
-                    nhead=cfg.num_heads,
-                    dim_feedforward=cfg.dim_feedforward,
-                    dropout=cfg.dropout
-                ) for _ in range(total_layers)]
-            )
-            # 场景特征适配器，注意维度顺序
+            self.seq_proc_layers = nn.ModuleList()
             self.kv_mapping_layers = nn.ModuleList()
-            # self.planes 来自 cfg: [32, 64, 128, 256] 是从细到粗
-            # SceneMapEncoderDecoder 的输出 cont_emb 是 [x4, x3, x2, x1]，维度是从粗到细
-            # 所以我们需要反转 planes 列表来匹配
-            for feature_dim in reversed(self.planes):
-                self.kv_mapping_layers.append(
-                    nn.Sequential(nn.Linear(feature_dim, self.latent_dim), nn.LayerNorm(self.latent_dim))
-                )
+            self.cross_attn_layers = nn.ModuleList()
 
+            # --- 核心设计：定义哪些层使用 Mamba ---
+            # 假设总共有 sum(cfg.num_layers) 层，你可以自由指定索引
+            mamba_layer_indices = cfg.mamba_layer_indices
+            
+            total_layers = sum(self.num_layers)
+            dpr = [x.item() for x in torch.linspace(0, cfg.drop_path_rate, total_layers)]
+            
+            current_layer_idx = 0
+            for i, stage_depth in enumerate(self.num_layers):
+                stage_blocks = nn.ModuleList()
+                for j in range(stage_depth):
+                    if current_layer_idx in mamba_layer_indices:
+                        print(f"  > 第 {current_layer_idx} 层使用: MambaMixer")
+                        mixer = MambaMixer(d_model=self.latent_dim, device=self.device)
+                    else:
+                        print(f"  > 第 {current_layer_idx} 层使用: SelfAttention")
+                        mixer = SelfAttentionWrapper(
+                            d_model=self.latent_dim, nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout
+                        )
+                    
+                    stage_blocks.append(
+                        DecoderBlock(
+                            dim=self.latent_dim, mixer_module=mixer,
+                            drop_path=dpr[current_layer_idx], layer_scale=1e-5
+                        )
+                    )
+                    current_layer_idx += 1
+                
+                self.seq_proc_layers.append(stage_blocks)
 
+                if i != len(self.num_layers) - 1:
+                    # planes 是您自己的配置，这里用 latent_dim 替代
+                    self.kv_mapping_layers.append(
+                        nn.Sequential(
+                            nn.Linear(self.latent_dim, self.latent_dim, bias=True),
+                            nn.LayerNorm(self.latent_dim),
+                        )
+                    )
+                    self.cross_attn_layers.append(
+                        nn.TransformerDecoderLayer(
+                            d_model=self.latent_dim, nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
+                            activation='gelu', batch_first=True,
+                        )
+                    )
         else:
             raise NotImplementedError
 
@@ -235,7 +263,6 @@ class CMDM(nn.Module):
             x = x[:, non_motion_token:, :]
 
         elif self.arch == 'trans_dec':
-
             # Decoder架构：将时间、文本和动作作为Query序列
             x = torch.cat([time_emb, text_emb, x], dim=1)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
@@ -266,46 +293,36 @@ class CMDM(nn.Module):
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
         elif self.arch == 'trans_mamba':
-            
-            # 1. 准备Query序列 (与 trans_dec 完全一致)
-            #    直接在变量 'x' 上进行操作，不再使用 'x_seq'
+# 拼接输入序列
             x = torch.cat([time_emb, text_emb, x], dim=1)
-            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+            # 添加位置编码
+            x = self.positional_encoder(x) # 简化版
 
-            # 准备Query序列的掩码 (与 trans_dec 完全一致)
             x_mask = None
-            if self.mask_motion:
-                motion_mask = kwargs['x_mask']
-                x_mask = torch.cat([time_mask, text_mask, motion_mask], dim=1)
+            if self.mask_motion and 'x_mask' in kwargs:
+                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
 
-            # 2. 逐层、分阶段去噪 (循环结构与 trans_dec 保持一致)
-            layer_idx_counter = 0
-            # 使用 'i' 作为循环变量，与 trans_dec 保持一致
             for i in range(len(self.num_layers)):
-                num_blocks_in_stage = self.num_layers[i]
-                
-                # 2a. 准备当前阶段的场景 Memory 和 memory_mask (与 trans_dec 完全一致)
-                mem = cont_emb[i]  # memory
-                mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
-                if 'c_pc_mask' in kwargs:
-                    mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].unsqueeze(1).expand(-1, mem.shape[1]))
-                if 'c_pc_erase' in kwargs:
-                    mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
+                # 1. 序列处理层 (Mamba 或 Self-Attention)
+                for block in self.seq_proc_layers[i]:
+                    mixer_kwargs = {}
+                    if isinstance(block.mixer, SelfAttentionWrapper):
+                        mixer_kwargs['src_key_padding_mask'] = x_mask
+                    x = block(x, **mixer_kwargs)
 
-                # 2b. 将场景特征适配到正确维度 (与 trans_dec 中 kv_mappling_layers 的作用一致)
-                mem = self.kv_mapping_layers[i](mem)
-                
-                # 2c. 在当前阶段内，执行 N 个解码器块
-                #    这里的核心区别是：调用的是我们强大的 TransMambaDecoderBlock
-                for _ in range(num_blocks_in_stage):
-                    current_block = self.motion_decoder_layers[layer_idx_counter]
-                    # 将 x, mem 和对应的 mask 传入，并直接更新 x (与 trans_dec 完全一致)
-                    x = current_block(x, mem, x_mask=x_mask, mem_mask=mem_mask)
-                    layer_idx_counter += 1
-            
-            # 3. 提取结果 (与 trans_dec 完全一致)
-            non_motion_token_count = time_emb.shape[1] + text_emb.shape[1]
-            x = x[:, non_motion_token_count:, :]
+                # 2. 交叉注意力层
+                if i != len(self.num_layers) - 1:
+                    mem = cont_emb[i]
+                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                    if 'c_pc_mask' in kwargs:
+                         mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'])
+                    
+                    mem = self.kv_mapping_layers[i](mem)
+                    x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
+
+            # 丢弃条件 token 的输出，只保留动作序列
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
         else:
             raise NotImplementedError
 
