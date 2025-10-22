@@ -462,11 +462,16 @@ class Block_time(BaseModule):
                  init_mode='fancy', init_values=None, post_norm=False, with_cp=False, **kwargs):
         super().__init__()
         self.layer_id = layer_id
+        self.post_norm = post_norm
+        
+        # LayerNorm 层现在根据 post_norm 的设置来决定位置
+        # 对于 Pre-LN，每个操作前都需要一个 LN
+        # 对于 Post-LN，每个残差块后只需要一个 LN
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
+        
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-        # 使用我们适配后的一维时序模块
         self.att = BiRWKV_TemporalMix(
             n_embd=n_embd,
             n_layer=n_layer,
@@ -474,7 +479,6 @@ class Block_time(BaseModule):
             init_mode=init_mode
         )
 
-        # 使用我们适配后的一维通道混合模块
         self.ffn = BiRWKV_ChannelMix(
             n_embd=n_embd,
             n_layer=n_layer,
@@ -484,33 +488,59 @@ class Block_time(BaseModule):
         )
 
         self.layer_scale = (init_values is not None)
-        self.post_norm = post_norm
         if self.layer_scale:
             self.gamma1 = nn.Parameter(init_values * torch.ones((n_embd)), requires_grad=True)
             self.gamma2 = nn.Parameter(init_values * torch.ones((n_embd)), requires_grad=True)
         self.with_cp = with_cp
 
-    # 移除了 forward 函数中的 patch_resolution 参数
     def forward(self, x):
         def _inner_forward(x):
-            # Pre-LN 结构 (先 Norm 再计算)
+            # --- Pre-LN (前置归一化) 结构 ---
+            # 这是更常用和稳定的结构: x = x + operation(ln(x))
             if not self.post_norm:
+                # 缓存原始 x 用于残差连接
+                residual = x
+                
+                # 第一个子层: Temporal Mix
+                x = self.ln1(x)
+                x = self.att(x)
                 if self.layer_scale:
-                    x = x + self.drop_path(self.gamma1 * self.att(self.ln1(x)))
-                    x = x + self.drop_path(self.gamma2 * self.ffn(self.ln2(x)))
-                else:
-                    x = x + self.drop_path(self.att(self.ln1(x)))
-                    x = x + self.drop_path(self.ffn(self.ln2(x)))
-            # Post-LN 结构 (先计算再 Norm)
+                    x = self.gamma1 * x
+                x = self.drop_path(x)
+                x = residual + x
+                
+                # 第二个子层: Channel Mix
+                residual = x # 更新残差
+                x = self.ln2(x)
+                x = self.ffn(x)
+                if self.layer_scale:
+                    x = self.gamma2 * x
+                x = self.drop_path(x)
+                x = residual + x
+                
+            # --- Post-LN (后置归一化) 结构 ---
+            # 修正后的结构: x = ln(x + operation(x))
             else:
+                # 第一个子层: Temporal Mix
+                residual = x
+                x = self.att(x)
                 if self.layer_scale:
-                    x = x + self.drop_path(self.gamma1 * self.ln1(self.att(x)))
-                    x = x + self.drop_path(self.gamma2 * self.ln2(self.ffn(x)))
-                else:
-                    x = x + self.drop_path(self.ln1(self.att(x)))
-                    x = x + self.drop_path(self.ln2(self.ffn(x)))
+                    x = self.gamma1 * x
+                x = self.drop_path(x)
+                x = residual + x
+                x = self.ln1(x) # 在残差连接之后进行 LayerNorm
+                
+                # 第二个子层: Channel Mix
+                residual = x # 更新残差
+                x = self.ffn(x)
+                if self.layer_scale:
+                    x = self.gamma2 * x
+                x = self.drop_path(x)
+                x = residual + x
+                x = self.ln2(x) # 在残差连接之后进行 LayerNorm
+
             return x
-            
+             
         if self.with_cp and x.requires_grad:
             x = cp.checkpoint(_inner_forward, x)
         else:
