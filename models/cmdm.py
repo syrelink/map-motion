@@ -9,6 +9,8 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
 
+from models.vrwkv import Block_time
+
 @Model.register()
 class CMDM(nn.Module):
 
@@ -111,6 +113,60 @@ class CMDM(nn.Module):
                             batch_first=True,
                         )
                     )
+        elif self.arch == 'trans_wkv':
+            self.self_attn_layers = nn.ModuleList()
+            self.kv_mappling_layers = nn.ModuleList()
+            self.cross_attn_layers = nn.ModuleList()
+
+            for i, n in enumerate(self.num_layers):
+                # -------------------- 修改开始 --------------------
+                # 原始的 Transformer 自注意力层
+                # self.self_attn_layers.append(
+                #     nn.TransformerEncoder(
+                #         nn.TransformerEncoderLayer(
+                #             d_model=self.latent_dim,
+                #             nhead=cfg.num_heads,
+                #             dim_feedforward=cfg.dim_feedforward,
+                #             dropout=cfg.dropout,
+                #             activation='gelu',
+                #             batch_first=True,
+                #         ),
+                #         num_layers=n,
+                #     )
+                # )
+
+                # [修改后] 使用 WKV 模块替换自注意力
+                # 这里的 n 代表在这一层级中堆叠 n 个 Block_time 模块
+                # 我们使用 nn.Sequential 来包裹它们
+                wkv_self_attention_stack = nn.Sequential(
+                    *[Block_time(
+                        n_embd=self.latent_dim,
+                        n_layer=sum(self.num_layers), # 总层数，用于fancy init
+                        layer_id=sum(self.num_layers[:i]) + layer_idx, # 当前块的全局ID
+                        hidden_rate=4, # FFN的隐藏层倍率，可设为超参数
+                        # drop_path, init_values 等参数也可以根据需要添加
+                    ) for layer_idx in range(n)]
+                )
+                self.self_attn_layers.append(wkv_self_attention_stack)
+                # -------------------- 修改结束 --------------------
+                if i != len(self.num_layers) - 1:
+                    # 交叉注意力的部分保持不变
+                    self.kv_mappling_layers.append(
+                        nn.Sequential(
+                            nn.Linear(self.planes[-1-i], self.latent_dim, bias=True),
+                            nn.LayerNorm(self.latent_dim),
+                        )
+                    )
+                    self.cross_attn_layers.append(
+                        nn.TransformerDecoderLayer(
+                            d_model=self.latent_dim,
+                            nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward,
+                            dropout=cfg.dropout,
+                            activation='gelu',
+                            batch_first=True,
+                        )
+                    )
         else:
             raise NotImplementedError
         self.motion_layer = nn.Linear(self.latent_dim, self.motion_dim, bias=True)
@@ -185,6 +241,38 @@ class CMDM(nn.Module):
                     if 'c_pc_erase' in kwargs:
                         mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
                     mem = self.kv_mappling_layers[i](mem)
+                    x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
+
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        elif self.arch == 'trans_wkv':
+            x = torch.cat([time_emb, text_emb, x], dim=1) # [bs, 2 + seq_len, latent_dim]
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1) # [bs, 2 + seq_len]
+
+            for i in range(len(self.num_layers)):
+                # -------------------- 修改开始 --------------------
+                # 原始调用
+                # x = self.self_attn_layers[i](x, src_key_padding_mask=x_mask) # self attention
+
+                # [修改后] 调用 WKV 模块
+                # Block_time 的 forward 函数签名是 forward(self, x)，不需要mask
+                x = self.self_attn_layers[i](x)
+                # -------------------- 修改结束 --------------------
+                
+                # 交叉注意力的部分保持不变
+                if i != len(self.num_layers) - 1: # cross attention
+                    mem = cont_emb[i]
+                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                    if 'c_pc_mask' in kwargs:
+                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].repeat(1, mem_mask.shape[1]))
+                    if 'c_pc_erase' in kwargs:
+                        mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
+                    mem = self.kv_mappling_layers[i](mem)
+                    # 这里的 tgt_key_padding_mask=x_mask 依然很重要，它告诉交叉注意力层x中的哪些部分是padding，不需要关注
                     x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
 
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
