@@ -22,7 +22,7 @@ logger = logging.getLogger(__name__)
 
 
 from torch.utils.cpp_extension import load
-wkv_cuda = load(name="bi_wkv", sources=["git-space/map-motion/models/tools/cuda_new/bi_wkv.cpp", "git-space/map-motion/models/tools/cuda_new/bi_wkv_kernel.cu"],
+wkv_cuda = load(name="bi_wkv", sources=["models/tools/cuda_new/bi_wkv.cpp", "models/tools/cuda_new/bi_wkv_kernel.cu"],
                 verbose=True, extra_cuda_cflags=['-res-usage', '--maxrregcount 60', '--use_fast_math', '-O3', '-Xptxas -O3', '-gencode arch=compute_86,code=sm_86'])
 
 
