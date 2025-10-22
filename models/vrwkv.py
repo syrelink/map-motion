@@ -305,48 +305,62 @@ class VRWKV_ChannelMix(BaseModule):
 
 class BiRWKV_TemporalMix(BaseModule):
     """
-    [已修正] 时间混合模块 (替代自注意力)。
+    [最终修正版] 时间混合模块 (替代自注意力)。
+    - 实现了有界指数，提升训练稳定性。
     - 恢复使用独立的 K, V, R 投影层以保证逻辑正确。
     - 接受 'x_prev' 作为参数，避免重复计算。
     """
     def __init__(self, n_embd, n_layer, layer_id, init_mode='fancy'):
         super().__init__()
+        # ... (init 部分与您之前的代码相同，无需改动)
         self.n_embd = n_embd
         self.layer_id = layer_id
         self.n_layer = n_layer
 
         with torch.no_grad():
             # (您的 'fancy' 初始化逻辑保持不变)
-            ratio_0_to_1 = layer_id / (n_layer - 1)
+            ratio_0_to_1 = layer_id / (n_layer - 1) if n_layer > 1 else 0
             ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)
-            # ... (此处省略完整的初始化代码，与您原版一致)
-            self.time_decay = nn.Parameter(torch.ones(n_embd))
-            self.time_first = nn.Parameter(torch.ones(n_embd))
-            self.time_mix_k = nn.Parameter(torch.ones(1, 1, n_embd))
-            self.time_mix_v = nn.Parameter(torch.ones(1, 1, n_embd))
-            self.time_mix_r = nn.Parameter(torch.ones(1, 1, n_embd))
 
-        # --- 修正点: 恢复为三个独立的线性层 ---
+            decay_speed = torch.ones(n_embd)
+            for h in range(n_embd):
+                decay_speed[h] = -5 + 8 * (h / (n_embd - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
+            self.time_decay = nn.Parameter(decay_speed)
+
+            zigzag = torch.tensor([(i + 1) % 3 - 1 for i in range(n_embd)]) * 0.5
+            self.time_first = nn.Parameter(torch.ones(n_embd) * math.log(0.3) + zigzag)
+
+            x = torch.ones(1, 1, n_embd)
+            for i in range(n_embd):
+                x[0, 0, i] = i / n_embd
+            self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
+            self.time_mix_v = nn.Parameter(torch.pow(x, ratio_1_to_almost0) + 0.3 * ratio_0_to_1)
+            self.time_mix_r = nn.Parameter(torch.pow(x, 0.5 * ratio_1_to_almost0))
+
         self.key = nn.Linear(n_embd, n_embd, bias=False)
         self.value = nn.Linear(n_embd, n_embd, bias=False)
         self.receptance = nn.Linear(n_embd, n_embd, bias=False)
         self.output = nn.Linear(n_embd, n_embd, bias=False)
 
     def forward(self, x, x_prev):
+        # --- 新增: 从输入 x 获取序列长度 T ---
+        B, T, C = x.size()
+
         # 使用学习到的系数混合当前和过去的 token
         xk = torch.lerp(x_prev, x, self.time_mix_k)
         xv = torch.lerp(x_prev, x, self.time_mix_v)
         xr = torch.lerp(x_prev, x, self.time_mix_r)
 
-        # --- 修正点: 分别计算 k, v, r ---
+        # 分别计算 k, v, r
         k = self.key(xk)
         v = self.value(xv)
         r = self.receptance(xr)
         
         sr = torch.sigmoid(r)
 
-        # 假设 RUN_CUDA 存在
-        wkv_out = RUN_CUDA(self.time_decay, self.time_first, k, v)
+        # --- 修正点: 调用 RUN_CUDA 时进行除法操作 ---
+        wkv_out = RUN_CUDA(self.time_decay / T, self.time_first / T, k, v)
+        
         return self.output(sr * wkv_out)
 
 class BiRWKV_ChannelMix(BaseModule):
