@@ -16,7 +16,7 @@ from mmcls.models.builder import BACKBONES
 from mmcls.models.utils import resize_pos_embed
 from mmcls.models.backbones.base_backbone import BaseBackbone
 
-from models.utils import DropPath
+from models.tools import DropPath
 
 logger = logging.getLogger(__name__)
 
