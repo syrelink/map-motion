@@ -38,6 +38,8 @@ class CMDM(nn.Module):
             self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
         elif self.arch == 'trans_dec':
             SceneMapModule = SceneMapEncoderDecoder
+        elif self.arch == 'trans_wkv':
+            SceneMapModule = SceneMapEncoderDecoder
         else:
             raise NotImplementedError
         self.contact_encoder = SceneMapModule(
