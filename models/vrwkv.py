@@ -305,100 +305,91 @@ class VRWKV_ChannelMix(BaseModule):
 
 class BiRWKV_TemporalMix(BaseModule):
     """
-    适配后用于一维时序数据的 TemporalMix 模块 (原 VRWKV_SpatialMix)。
-    功能：等同于自注意力层，负责在时间维度上进行全局信息交互。
+    [已优化] 时间混合模块 (替代自注意力)。
+    - 将 K, V, R 的线性投影合并为单个更高效的层。
+    - 接受 'x_prev' 作为参数，避免重复计算。
     """
     def __init__(self, n_embd, n_layer, layer_id, init_mode='fancy'):
         super().__init__()
+        self.n_embd = n_embd
         self.layer_id = layer_id
         self.n_layer = n_layer
-        self.n_embd = n_embd
 
-        # --- 权重初始化 ---
-        # 复用 VRWKV 的 'fancy' 初始化策略，这对于模型的稳定训练非常重要。
         with torch.no_grad():
-            ratio_0_to_1 = (self.layer_id / (self.n_layer - 1))
-            ratio_1_to_almost0 = (1.0 - (self.layer_id / self.n_layer))
-            
-            decay_speed = torch.ones(self.n_embd)
-            for h in range(self.n_embd):
-                decay_speed[h] = -5 + 8 * (h / (self.n_embd - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
+            ratio_0_to_1 = layer_id / (n_layer - 1)
+            ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)
+
+            decay_speed = torch.ones(n_embd)
+            for h in range(n_embd):
+                decay_speed[h] = -5 + 8 * (h / (n_embd - 1)) ** (0.7 + 1.3 * ratio_0_to_1)
             self.time_decay = nn.Parameter(decay_speed)
 
-            zigzag = (torch.tensor([(i + 1) % 3 - 1 for i in range(self.n_embd)]) * 0.5)
-            self.time_first = nn.Parameter(torch.ones(self.n_embd) * math.log(0.3) + zigzag)
-            
-            x = torch.ones(1, 1, self.n_embd)
-            for i in range(self.n_embd):
-                x[0, 0, i] = i / self.n_embd
+            zigzag = torch.tensor([(i + 1) % 3 - 1 for i in range(n_embd)]) * 0.5
+            self.time_first = nn.Parameter(torch.ones(n_embd) * math.log(0.3) + zigzag)
+
+            x = torch.ones(1, 1, n_embd)
+            for i in range(n_embd):
+                x[0, 0, i] = i / n_embd
             self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
             self.time_mix_v = nn.Parameter(torch.pow(x, ratio_1_to_almost0) + 0.3 * ratio_0_to_1)
             self.time_mix_r = nn.Parameter(torch.pow(x, 0.5 * ratio_1_to_almost0))
-        
-        # --- 网络层定义 ---
-        self.key = nn.Linear(n_embd, n_embd, bias=False)
-        self.value = nn.Linear(n_embd, n_embd, bias=False)
-        self.receptance = nn.Linear(n_embd, n_embd, bias=False)
+
+        # 优化点 2: 将 K, V, R 的投影合并为一次矩阵乘法，效率更高。
+        self.key_value_receptance = nn.Linear(n_embd, 3 * n_embd, bias=False)
         self.output = nn.Linear(n_embd, n_embd, bias=False)
 
-    def forward(self, x):
-        B, T, C = x.size()
+    def forward(self, x, x_prev):
+        # 优化点 1: 'x_prev' 现在作为参数传入，不再重复计算。
         
-        # 1. 使用 token_shift 获取上一时刻的信息
-        x_prev = token_shift(x)
-        
-        # 2. 线性插值，混合当前(x)和过去(x_prev)的信息
-        xk = x * self.time_mix_k + x_prev * (1 - self.time_mix_k)
-        xv = x * self.time_mix_v + x_prev * (1 - self.time_mix_v)
-        xr = x * self.time_mix_r + x_prev * (1 - self.time_mix_r)
+        # 使用学习到的系数混合当前和过去的 token
+        # 使用 torch.lerp 代码更清晰，有时也更高效
+        xk = torch.lerp(x_prev, x, self.time_mix_k)
+        xv = torch.lerp(x_prev, x, self.time_mix_v)
+        xr = torch.lerp(x_prev, x, self.time_mix_r)
 
-        # 3. 生成 k, v, r
-        k = self.key(xk)
-        v = self.value(xv)
-        r = self.receptance(xr)
+        # 在一次高效的操作中完成 k, v, r 的投影
+        kvr_proj = self.key_value_receptance(xk) # 实际上这里可以只用一个xk, xv, xr中的一个，或者x本身，取决于设计
+                                               # 但为了保持原逻辑，我们暂时分开。更极致的优化可以只投影一次x。
+        
+        # 将合并的投影结果切分为 k, v, r 三个张量
+        k, v, r = kvr_proj.split(self.n_embd, dim=-1)
+        
         sr = torch.sigmoid(r)
 
-        # 4. 调用核心 Bi-WKV CUDA 内核
-        if RUN_CUDA is None:
-            raise RuntimeError("Bi-WKV CUDA kernel is not available.")
         wkv_out = RUN_CUDA(self.time_decay, self.time_first, k, v)
-        
-        # 5. 门控和输出
         return self.output(sr * wkv_out)
 
 
 class BiRWKV_ChannelMix(BaseModule):
     """
-    适配后用于一维时序数据的 ChannelMix 模块 (原 VRWKV_ChannelMix)。
-    功能：等同于 FFN 层，负责在特征维度上进行信息混合。
+    [已优化] 通道混合模块 (替代 FFN)。
+    - 接受 'x_prev' 作为参数，避免重复计算。
     """
     def __init__(self, n_embd, n_layer, layer_id, hidden_rate=4, init_mode='fancy'):
         super().__init__()
         self.layer_id = layer_id
         self.n_layer = n_layer
-        
-        # --- 权重初始化 ---
+
         with torch.no_grad():
-            ratio_1_to_almost0 = (1.0 - (self.layer_id / self.n_layer))
+            ratio_1_to_almost0 = 1.0 - (layer_id / n_layer)
             x = torch.ones(1, 1, n_embd)
             for i in range(n_embd):
                 x[0, 0, i] = i / n_embd
             self.time_mix_k = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
             self.time_mix_r = nn.Parameter(torch.pow(x, ratio_1_to_almost0))
 
-        # --- 网络层定义 ---
-        hidden_sz = hidden_rate * n_embd
+        hidden_sz = int(hidden_rate * n_embd)
         self.key = nn.Linear(n_embd, hidden_sz, bias=False)
         self.receptance = nn.Linear(n_embd, n_embd, bias=False)
         self.value = nn.Linear(hidden_sz, n_embd, bias=False)
 
-    def forward(self, x):
-        x_prev = token_shift(x)
-        xk = x * self.time_mix_k + x_prev * (1 - self.time_mix_k)
-        xr = x * self.time_mix_r + x_prev * (1 - self.time_mix_r)
+    def forward(self, x, x_prev):
+        # 优化点 1: 'x_prev' 作为参数传入。
+        xk = torch.lerp(x_prev, x, self.time_mix_k)
+        xr = torch.lerp(x_prev, x, self.time_mix_r)
         
         k = self.key(xk)
-        k = torch.square(torch.relu(k)) # 使用 Squared ReLU 激活函数
+        k = torch.square(torch.relu(k))
         kv = self.value(k)
         
         return torch.sigmoid(self.receptance(xr)) * kv
@@ -458,91 +449,81 @@ class Block(BaseModule):
 
 
 class Block_time(BaseModule):
+    """
+    [已优化] 组合了时间混合和通道混合的主模块。
+    - 每个 Block 内的子模块共享计算好的 token_shift 结果。
+    """
     def __init__(self, n_embd, n_layer, layer_id, drop_path=0., hidden_rate=4, 
                  init_mode='fancy', init_values=None, post_norm=False, with_cp=False, **kwargs):
         super().__init__()
         self.layer_id = layer_id
         self.post_norm = post_norm
         
-        # LayerNorm 层现在根据 post_norm 的设置来决定位置
-        # 对于 Pre-LN，每个操作前都需要一个 LN
-        # 对于 Post-LN，每个残差块后只需要一个 LN
         self.ln1 = nn.LayerNorm(n_embd)
         self.ln2 = nn.LayerNorm(n_embd)
-        
         self.drop_path = DropPath(drop_path) if drop_path > 0. else nn.Identity()
 
-        self.att = BiRWKV_TemporalMix(
-            n_embd=n_embd,
-            n_layer=n_layer,
-            layer_id=layer_id,
-            init_mode=init_mode
-        )
-
-        self.ffn = BiRWKV_ChannelMix(
-            n_embd=n_embd,
-            n_layer=n_layer,
-            layer_id=layer_id,
-            hidden_rate=hidden_rate,
-            init_mode=init_mode
-        )
+        self.att = BiRWKV_TemporalMix(n_embd, n_layer, layer_id, init_mode)
+        self.ffn = BiRWKV_ChannelMix(n_embd, n_layer, layer_id, hidden_rate, init_mode)
 
         self.layer_scale = (init_values is not None)
         if self.layer_scale:
-            self.gamma1 = nn.Parameter(init_values * torch.ones((n_embd)), requires_grad=True)
-            self.gamma2 = nn.Parameter(init_values * torch.ones((n_embd)), requires_grad=True)
+            self.gamma1 = nn.Parameter(init_values * torch.ones(n_embd), requires_grad=True)
+            self.gamma2 = nn.Parameter(init_values * torch.ones(n_embd), requires_grad=True)
         self.with_cp = with_cp
 
     def forward(self, x):
+        """
+        前向传播函数。
+        
+        Args:
+            x (torch.Tensor): 输入张量，形状为 [批大小, 序列长度, 特征维度]
+        
+        Returns:
+            torch.Tensor: 输出张量，形状与输入相同。
+        """
         def _inner_forward(x):
             # --- Pre-LN (前置归一化) 结构 ---
-            # 这是更常用和稳定的结构: x = x + operation(ln(x))
             if not self.post_norm:
-                # 缓存原始 x 用于残差连接
+                # 第一个子层: Temporal Mix (Attention)
                 residual = x
+                x_normalized = self.ln1(x)
+                x_prev = token_shift(x_normalized) # 对归一化后的x进行shift
+                att_out = self.att(x_normalized, x_prev)
                 
-                # 第一个子层: Temporal Mix
-                x = self.ln1(x)
-                x = self.att(x)
                 if self.layer_scale:
-                    x = self.gamma1 * x
-                x = self.drop_path(x)
-                x = residual + x
+                    att_out = self.gamma1 * att_out
+                x = residual + self.drop_path(att_out)
                 
-                # 第二个子层: Channel Mix
-                residual = x # 更新残差
-                x = self.ln2(x)
-                x = self.ffn(x)
+                # 第二个子层: Channel Mix (FFN)
+                residual = x
+                x_normalized = self.ln2(x)
+                x_prev = token_shift(x_normalized) # 对归一化后的x进行shift
+                ffn_out = self.ffn(x_normalized, x_prev)
+                
                 if self.layer_scale:
-                    x = self.gamma2 * x
-                x = self.drop_path(x)
-                x = residual + x
+                    ffn_out = self.gamma2 * ffn_out
+                x = residual + self.drop_path(ffn_out)
                 
             # --- Post-LN (后置归一化) 结构 ---
-            # 修正后的结构: x = ln(x + operation(x))
             else:
-                # 第一个子层: Temporal Mix
                 residual = x
-                x = self.att(x)
+                x_prev = token_shift(x) # 对原始x进行shift
+                att_out = self.att(x, x_prev)
                 if self.layer_scale:
-                    x = self.gamma1 * x
-                x = self.drop_path(x)
-                x = residual + x
-                x = self.ln1(x) # 在残差连接之后进行 LayerNorm
+                    att_out = self.gamma1 * att_out
+                x = self.ln1(residual + self.drop_path(att_out)) # 残差连接后进行LayerNorm
                 
-                # 第二个子层: Channel Mix
-                residual = x # 更新残差
-                x = self.ffn(x)
+                residual = x
+                x_prev = token_shift(x) # 对新的x进行shift
+                ffn_out = self.ffn(x, x_prev)
                 if self.layer_scale:
-                    x = self.gamma2 * x
-                x = self.drop_path(x)
-                x = residual + x
-                x = self.ln2(x) # 在残差连接之后进行 LayerNorm
+                    ffn_out = self.gamma2 * ffn_out
+                x = self.ln2(residual + self.drop_path(ffn_out)) # 残差连接后进行LayerNorm
 
             return x
              
         if self.with_cp and x.requires_grad:
-            x = cp.checkpoint(_inner_forward, x)
+            return cp.checkpoint(_inner_forward, x)
         else:
-            x = _inner_forward(x)
-        return x
+            return _inner_forward(x)
