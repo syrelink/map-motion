@@ -2,7 +2,6 @@ import torch
 import torch.nn as nn
 from einops import rearrange, einsum
 from omegaconf import DictConfig
-from mamba_ssm import Mamba
 
 from models.base import Model
 from models.modules import TimestepEmbedder, CrossAttentionLayer, SelfAttentionBlock
@@ -12,40 +11,6 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
 from models.functions import load_scene_model
 
 class PointSceneMLP(nn.Module):
-
-    def __init__(self, in_dim: int, out_dim: int, widening_factor: int=1, bias: bool=True) -> None:
-        super().__init__()
-        # 前置 MLP：用于特征投影和非线性变换
-        self.mlp_pre = nn.Sequential(
-            nn.LayerNorm(in_dim),
-            nn.Linear(in_dim, widening_factor * in_dim, bias=bias),
-            nn.GELU(),
-            nn.Linear(widening_factor * in_dim, out_dim, bias=bias),
-        )
-
-        out_dim = out_dim * 2
-        # 后置 MLP：在拼接全局场景特征后进行二次处理
-        self.mlp_post = nn.Sequential(
-            nn.LayerNorm(out_dim),
-            nn.Linear(out_dim, out_dim, bias=bias),
-            nn.GELU(),
-            nn.Linear(out_dim, out_dim // 2, bias=bias),
-        )
-
-    def forward(self, point_feat: torch.Tensor) -> torch.Tensor:
-        point_feat = self.mlp_pre(point_feat) # [bs, N, out_dim]
-
-        # 计算全局场景特征：取所有点的平均特征
-        # mean(dim=1, keepdim=True): [bs, 1, out_dim]
-        # .repeat(1, point_feat.shape[1], 1): [bs, N, out_dim]，广播到所有点
-        scene_feat = point_feat.mean(dim=1, keepdim=True).repeat(1, point_feat.shape[1], 1)
-
-        # 核心操作：将局部点特征与全局场景特征拼接
-        point_feat = torch.cat([point_feat, scene_feat], dim=-1) # [bs, N, out_dim * 2]
-
-        point_feat = self.mlp_post(point_feat) # [bs, N, out_dim]
-
-        return point_feat
 
     def __init__(self, in_dim: int, out_dim: int, widening_factor: int=1, bias: bool=True) -> None:
         super().__init__()
@@ -120,85 +85,55 @@ class ContactMLP(nn.Module):
         return x
 
 
-import torch
-import torch.nn as nn
-from omegaconf import DictConfig
-# 假设 CrossAttentionLayer 和 SelfAttentionBlock, DictConfig 等已正确导入
-
 class ContactPerceiver(nn.Module):
     
     def __init__(self, arch_cfg: DictConfig, contact_dim: int, point_feat_dim: int, text_feat_dim: int, time_emb_dim: int) -> None:
-        """ 初始化 ContactPerceiver 模块。
-
-        Args:
-            arch_cfg: Perceiver 架构的配置字典 (包含维度、层数等)。
-            contact_dim: 输入接触图/Affordance Map 的特征维度。
-            point_feat_dim: 场景点云特征的维度。
-            text_feat_dim: 语言特征的维度。
-            time_emb_dim: 时间嵌入的维度。
-        """
         super().__init__()
 
-        # --- 超参数和维度设置 ---
-        self.point_pos_emb = arch_cfg.point_pos_emb # 是否将 3D 位置 (XYZ) 编码作为输入
+        self.point_pos_emb = arch_cfg.point_pos_emb
 
-        # Encoder (压缩) 阶段的参数
-        self.encoder_q_input_channels = arch_cfg.encoder_q_input_channels # Latent Query 的维度
-        self.encoder_kv_input_channels = arch_cfg.encoder_kv_input_channels # 场景 Key/Value 的维度
+        self.encoder_q_input_channels = arch_cfg.encoder_q_input_channels
+        self.encoder_kv_input_channels = arch_cfg.encoder_kv_input_channels
         self.encoder_num_heads = arch_cfg.encoder_num_heads
         self.encoder_widening_factor = arch_cfg.encoder_widening_factor
         self.encoder_dropout = arch_cfg.encoder_dropout
         self.encoder_residual_dropout = arch_cfg.encoder_residual_dropout
-        self.encoder_self_attn_num_layers = arch_cfg.encoder_self_attn_num_layers # Process Block 的层数
+        self.encoder_self_attn_num_layers = arch_cfg.encoder_self_attn_num_layers
         
-        # Decoder (解码) 阶段的参数
-        self.decoder_q_input_channels = arch_cfg.decoder_q_input_channels # Decoder Query 的维度
-        self.decoder_kv_input_channels = arch_cfg.decoder_kv_input_channels # Decoder Key/Value (即精炼后的 Latent) 的维度
+        self.decoder_q_input_channels = arch_cfg.decoder_q_input_channels
+        self.decoder_kv_input_channels = arch_cfg.decoder_kv_input_channels
         self.decoder_num_heads = arch_cfg.decoder_num_heads
         self.decoder_widening_factor = arch_cfg.decoder_widening_factor
         self.decoder_dropout = arch_cfg.decoder_dropout
         self.decoder_residual_dropout = arch_cfg.decoder_residual_dropout
 
-        # --- 适配器 (Adapters): 用于维度匹配 ---
-        # 语言特征适配器：映射到 Encoder Query 维度
         self.language_adapter = nn.Linear(
             text_feat_dim,
             self.encoder_q_input_channels,
             bias=True)
-        # 时间嵌入适配器：映射到 Encoder Query 维度
         self.time_embedding_adapter = nn.Linear(
             time_emb_dim,
             self.encoder_q_input_channels,
             bias=True)
 
-        # Encoder 输入适配器：将所有输入特征 (接触图+点特征+可选位置) 映射到 KV 维度
-        input_dim = contact_dim + point_feat_dim + (3 if self.point_pos_emb else 0)
         self.encoder_adapter = nn.Linear(
-            input_dim, 
+            contact_dim + point_feat_dim + (3 if self.point_pos_emb else 0), 
             self.encoder_kv_input_channels,
             bias=True)
-        
-        # Decoder 输入适配器：将 Encoder 的 KV 输入 (场景点特征) 映射到 Decoder Query 维度
         self.decoder_adapter = nn.Linear(
             self.encoder_kv_input_channels,
             self.decoder_q_input_channels,
             bias=True)
 
-        # --- Perceiver 核心注意力组件 ---
-        
-        # 1. Encoder Cross-Attention (Encode Block: 场景信息压缩到 Latent)
         self.encoder_cross_attn = CrossAttentionLayer(
             num_heads=self.encoder_num_heads,
-            # q代表时间步和文本条件
             num_q_input_channels=self.encoder_q_input_channels,
-            # kv代表3D场景点云特征
             num_kv_input_channels=self.encoder_kv_input_channels,
             widening_factor=self.encoder_widening_factor,
             dropout=self.encoder_dropout,
             residual_dropout=self.encoder_residual_dropout,
         )
 
-        # 2. Encoder Self-Attention (Process Block: Latent 向量内部精炼)
         self.encoder_self_attn = SelfAttentionBlock(
             num_layers=self.encoder_self_attn_num_layers,
             num_heads=self.encoder_num_heads,
@@ -208,7 +143,6 @@ class ContactPerceiver(nn.Module):
             residual_dropout=self.encoder_residual_dropout,
         )
 
-        # 3. Decoder Cross-Attention (Decode Block: Latent 信息回传给场景点)
         self.decoder_cross_attn = CrossAttentionLayer(
             num_heads=self.decoder_num_heads,
             num_q_input_channels=self.decoder_q_input_channels,
@@ -219,181 +153,37 @@ class ContactPerceiver(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, point_feat: torch.Tensor, language_feat: torch.Tensor, time_embedding: torch.Tensor, **kwargs) -> torch.Tensor:
-        """ 前向传播：实现 Perceiver 的 Encode -> Process -> Decode 流程。
+        """ Forward pass of the ContactMLP.
 
         Args:
-            x: 输入接触图 (带噪信号),[bs, num_points, contact_dim] (最终生成的地图,只不过加入了噪声)
-            point_feat: 场景点特征，[bs, num_points, point_feat_dim] (是描述3D场景的静态特征信息)
-            language_feat: 语言特征，[bs, 1, language_feat_dim]
-            time_embedding: 时间嵌入，[bs, 1, time_embedding_dim]
+            x: input contact map, [bs, num_points, contact_dim]
+            point_feat: [bs, num_points, point_feat_dim]
+            language_feat: [bs, 1, language_feat_dim]
+            time_embedding: [bs, 1, time_embedding_dim]
         
         Returns:
-            去噪后的输出特征，[bs, num_points, dec_q_dim] 输入接触图(不带噪声)
+            Output contact map, [bs, num_points, contact_dim]
         """
-        # 1. 准备 Encoder Key/Value (KV) 输入 (大规模场景点特征)
         if point_feat is not None:
-            # 拼接点特征
-            x = torch.cat([x, point_feat], dim=-1) 
+            x = torch.cat([x, point_feat], dim=-1) # [bs, num_points, contact_dim + point_feat_dim]
         if self.point_pos_emb:
-            # 可选：拼接 3D 坐标 c_pc_xyz
             point_pos = kwargs['c_pc_xyz']
-            x = torch.cat([x, point_pos], dim=-1) 
+            x = torch.cat([x, point_pos], dim=-1) # [bs, num_points, contact_dim + point_feat_dim + 3]
 
-        # 将组合特征映射到 KV 维度
+        # encoder
         enc_kv = self.encoder_adapter(x) # [bs, num_points, enc_kv_dim]
 
-        # 2. 准备 Encoder Query (Q) 输入 (Latent Features: 语言 + 时间)
         language_feat = self.language_adapter(language_feat) # [bs, 1, enc_q_dim]
         time_embedding = self.time_embedding_adapter(time_embedding) # [bs, 1, enc_q_dim]
-        # 拼接 Latent 向量 (语言 Latent + 时间 Latent)
-        enc_q = torch.cat([language_feat, time_embedding], dim=1) # [bs, 2, enc_q_dim]
+        enc_q = torch.cat([language_feat, time_embedding], dim=1) # [bs, 1 + 1, enc_q_dim]
 
-        # 3. Encode Block (交叉注意力: Latent Q 查询 Scene KV)
-        enc_q = self.encoder_cross_attn(enc_q, enc_kv).last_hidden_state # [bs, 2, enc_q_dim]
-        
-        # 4. Process Block (自注意力: Latent 向量内部精炼)
-        enc_q = self.encoder_self_attn(enc_q).last_hidden_state # [bs, 2, enc_q_dim]
+        enc_q = self.encoder_cross_attn(enc_q, enc_kv).last_hidden_state
+        enc_q = self.encoder_self_attn(enc_q).last_hidden_state
 
-        # 5. Decode Block (交叉注意力: 信息回传)
-        dec_kv = enc_q # 精炼后的 Latent 向量作为 Decoder KV
-        
-        # 原始场景特征作为 Decoder Query
-        dec_q = self.decoder_adapter(enc_kv) # [bs, num_points, dec_q_dim]
-        
-        # Decoder Cross-Attention (Scene Q 查询 Latent KV)
-        dec_q = self.decoder_cross_attn(dec_q, dec_kv).last_hidden_state # [bs, num_points, dec_q_dim]
-
-        return dec_q
-
-class ContactPerceiverWithMamba(nn.Module):
-    
-    def __init__(self, arch_cfg: DictConfig, contact_dim: int, point_feat_dim: int, text_feat_dim: int, time_emb_dim: int) -> None:
-        """
-        初始化集成了 Mamba 的 ContactPerceiver 模块。
-        大部分参数与原始 ContactPerceiver 相同。
-        Mamba 的特定超参数可以通过 arch_cfg 进行配置。
-        """
-        super().__init__()
-
-        if Mamba is None:
-            raise ImportError("mamba-ssm 库未找到，无法初始化 ContactPerceiverWithMamba。")
-
-        # --- 超参数和维度设置 (与原始代码相同) ---
-        self.point_pos_emb = arch_cfg.point_pos_emb
-
-        self.encoder_q_input_channels = arch_cfg.encoder_q_input_channels
-        self.encoder_kv_input_channels = arch_cfg.encoder_kv_input_channels
-        self.encoder_num_heads = arch_cfg.encoder_num_heads
-        self.encoder_widening_factor = arch_cfg.encoder_widening_factor
-        self.encoder_dropout = arch_cfg.encoder_dropout
-        self.encoder_residual_dropout = arch_cfg.encoder_residual_dropout
-        
-        self.decoder_q_input_channels = arch_cfg.decoder_q_input_channels
-        self.decoder_kv_input_channels = arch_cfg.decoder_kv_input_channels
-        self.decoder_num_heads = arch_cfg.decoder_num_heads
-        self.decoder_widening_factor = arch_cfg.decoder_widening_factor
-        self.decoder_dropout = arch_cfg.decoder_dropout
-        self.decoder_residual_dropout = arch_cfg.decoder_residual_dropout
-        
-        # --- 适配器 (Adapters) (与原始代码相同) ---
-        self.language_adapter = nn.Linear(text_feat_dim, self.encoder_q_input_channels, bias=True)
-        self.time_embedding_adapter = nn.Linear(time_emb_dim, self.encoder_q_input_channels, bias=True)
-
-        input_dim = contact_dim + point_feat_dim + (3 if self.point_pos_emb else 0)
-        self.encoder_adapter = nn.Linear(input_dim, self.encoder_kv_input_channels, bias=True)
-        
-        self.decoder_adapter = nn.Linear(self.encoder_kv_input_channels, self.decoder_q_input_channels, bias=True)
-
-        # --- Perceiver 核心注意力组件 (部分修改) ---
-        
-        # 1. Encoder Cross-Attention (Encode Block) (与原始代码相同)
-        self.encoder_cross_attn = CrossAttentionLayer(
-            num_heads=self.encoder_num_heads,
-            num_q_input_channels=self.encoder_q_input_channels,
-            num_kv_input_channels=self.encoder_kv_input_channels,
-            widening_factor=self.encoder_widening_factor,
-            dropout=self.encoder_dropout,
-            residual_dropout=self.encoder_residual_dropout,
-        )
-
-        # =================================================================================
-        # 核心修改点：用 Mamba 替换 Transformer 的自注意力模块
-        # =================================================================================
-        # 原始代码:
-        # self.encoder_self_attn = SelfAttentionBlock(...)
-
-        # 新代码:
-        # 我们在这里创建一个 Mamba 模块来处理和精炼 Latent Query。
-        # 为了与原始 SelfAttentionBlock 的多层结构对齐，我们也可以堆叠多个Mamba层。
-        num_mamba_layers = arch_cfg.encoder_self_attn_num_layers
-        mamba_layers = []
-        for _ in range(num_mamba_layers):
-            mamba_layers.append(
-                Mamba(
-                    # Mamba的核心维度 d_model 必须与 Latent Query 的维度匹配
-                    d_model=self.encoder_q_input_channels,
-                    # 以下是Mamba的典型超参数，可以从配置文件中读取，如果不存在则使用默认值
-                    d_state=arch_cfg.get("mamba_d_state", 16),
-                    d_conv=arch_cfg.get("mamba_d_conv", 4),
-                    expand=arch_cfg.get("mamba_expand", 2),
-                )
-            )
-        # 使用 nn.Sequential 将多个 Mamba 层堆叠起来
-        self.mamba_process_block = nn.Sequential(*mamba_layers)
-        # =================================================================================
-
-        # 3. Decoder Cross-Attention (Decode Block) (与原始代码相同)
-        self.decoder_cross_attn = CrossAttentionLayer(
-            num_heads=self.decoder_num_heads,
-            num_q_input_channels=self.decoder_q_input_channels,
-            num_kv_input_channels=self.decoder_kv_input_channels,
-            widening_factor=self.decoder_widening_factor,
-            dropout=self.decoder_dropout,
-            residual_dropout=self.decoder_residual_dropout,
-        )
-
-    def forward(self, x: torch.Tensor, point_feat: torch.Tensor, language_feat: torch.Tensor, time_embedding: torch.Tensor, **kwargs) -> torch.Tensor:
-        """
-        前向传播流程，其中 Process Block 已被替换为 Mamba。
-        """
-        # 1. 准备 Encoder Key/Value (KV) 输入 (与原始代码相同)
-        if point_feat is not None:
-            x = torch.cat([x, point_feat], dim=-1) 
-        if self.point_pos_emb:
-            point_pos = kwargs['c_pc_xyz']
-            x = torch.cat([x, point_pos], dim=-1) 
-
-        enc_kv = self.encoder_adapter(x)
-
-        # 2. 准备 Encoder Query (Q) 输入 (与原始代码相同)
-        language_feat = self.language_adapter(language_feat)
-        time_embedding = self.time_embedding_adapter(time_embedding)
-        enc_q = torch.cat([language_feat, time_embedding], dim=1)
-
-        # 3. Encode Block (交叉注意力) (与原始代码相同)
-        # 此时，场景信息被压缩进了 enc_q
-        enc_q = self.encoder_cross_attn(enc_q, enc_kv)
-        if hasattr(enc_q, 'last_hidden_state'): # 兼容不同版本的输出
-             enc_q = enc_q.last_hidden_state
-
-        # =================================================================================
-        # 核心修改点：调用 Mamba 进行 Latent 精炼
-        # =================================================================================
-        # 原始代码:
-        # enc_q = self.encoder_self_attn(enc_q).last_hidden_state
-
-        # 新代码:
-        # 将经过编码的 Latent Query (enc_q) 送入 Mamba 模块进行处理
-        enc_q = self.mamba_process_block(enc_q)
-        # =================================================================================
-        
-        # 5. Decode Block (交叉注意力) (与原始代码相同)
+        # decoder
         dec_kv = enc_q
-        dec_q = self.decoder_adapter(enc_kv)
-        
-        dec_q = self.decoder_cross_attn(dec_q, dec_kv)
-        if hasattr(dec_q, 'last_hidden_state'):
-            dec_q = dec_q.last_hidden_state
+        dec_q = self.decoder_adapter(enc_kv) # [bs, num_points, dec_q_dim]
+        dec_q = self.decoder_cross_attn(dec_q, dec_kv).last_hidden_state # [bs, num_points, dec_q_dim]
 
         return dec_q
 
@@ -496,9 +286,6 @@ class ContactPointTrans(nn.Module):
 
         return rearrange(x1, '(b n) d -> b n d', b=len(offset), n=offset[0]) # (b, n, planes[0])
 
-# --------------------------------------------------------------------------------------
-# 5. 架构变体 D: ContactPointTransV2 (改进版 Point Transformer - 多层融合)
-# -------------------------------------------------------------------------------
 class ContactPointTransV2(nn.Module):
 
     def __init__(self, arch_cfg: DictConfig, contact_dim: int, point_feat_dim: int, text_feat_dim: int, time_emb_dim: int) -> None:
@@ -569,16 +356,16 @@ class ContactPointTransV2(nn.Module):
         return nn.Sequential(*layers)
 
     def forward(self, x: torch.Tensor, point_feat: torch.Tensor, language_feat: torch.Tensor, time_embedding: torch.Tensor, **kwargs) -> torch.Tensor:
-        """ 前向传播 (Forward pass) 的 ContactMLP。
+        """ Forward pass of the ContactMLP.
 
         Args:
-            x: 输入的接触图/Affordance Map (带噪信号)，形状为 [bs, num_points, contact_dim]。
-            point_feat: 场景点云特征，形状为 [bs, num_points, point_feat_dim]。
-            language_feat: 语言描述的特征嵌入 (如 CLIP 特征)，形状为 [bs, 1, language_feat_dim]。
-            time_embedding: 扩散模型的时间步嵌入，形状为 [bs, 1, time_embedding_dim]。
+            x: input contact map, [bs, num_points, contact_dim]
+            point_feat: [bs, num_points, point_feat_dim]
+            language_feat: [bs, 1, language_feat_dim]
+            time_embedding: [bs, 1, time_embedding_dim]
         
         Returns:
-            输出的接触图特征，形状为 [bs, num_points, contact_dim]。
+            Output contact map, [bs, num_points, contact_dim]
         """
         p = kwargs['c_pc_xyz']
 
@@ -622,32 +409,20 @@ class ContactPointTransV2(nn.Module):
 
         return rearrange(x1, '(b n) d -> b n d', b=len(offset)) # (b, n, planes[0])
 
-# --------------------------------------------------------------------------------------
-# 6. 主模型：CDM (Conditional Diffusion Model)
-# 负责集成所有条件输入并调用核心架构
-# --------------------------------------------------------------------------------------
 @Model.register()
 class CDM(nn.Module):
     def __init__(self, cfg: DictConfig, *args, **kwargs):
-        """
-        Conditional Diffusion Model (CDM) 的初始化函数。
-        这个类是 Affordance Diffusion Model (ADM) 的总封装和入口。
-        它负责根据配置文件，组装所有需要的子模块。
-        """
         super().__init__()
         self.device = kwargs['device'] if 'device' in kwargs else 'cpu'
 
-        # --- 1. 基本参数设置 ---
         self.contact_type = cfg.data_repr
-        self.contact_dim = cfg.input_feats  # Affordance Map (接触图) 的特征维度
+        self.contact_dim = cfg.input_feats
 
-        # --- 2. 时间嵌入模块 (Time Embedding) ---
-        # 将扩散步数 t (一个整数) 编码成一个高维向量
+        ## time embedding
         self.time_emb_dim = cfg.time_emb_dim
         self.timestep_embedder = TimestepEmbedder(self.time_emb_dim, self.time_emb_dim, max_len=1000)
 
-        # --- 3. 文本模型加载 (Text Model) ---
-        # 负责将文本指令编码成特征向量
+        ## text
         self.text_model_name = cfg.text_model.version
         self.text_max_length = cfg.text_model.max_length
         self.text_feat_dim, self.text_feat_type = get_lang_feat_dim_type(self.text_model_name)
@@ -658,8 +433,7 @@ class CDM(nn.Module):
         else:
             raise NotImplementedError
 
-        # --- 4. 场景特征提取模型 (Scene Feature Extractor) ---
-        # (可选) 负责将原始点云编码成更丰富的深度特征
+        ## scene
         if not cfg.scene_model.use_scene_model:
             self.point_feat_dim = 0
         elif cfg.scene_model.use_openscene:
@@ -671,8 +445,7 @@ class CDM(nn.Module):
                 cfg.scene_model.name, self.scene_model_dim, cfg.scene_model.num_points, cfg.scene_model.pretrained_weight, freeze=self.freeze_scene_model)
             self.point_feat_dim = cfg.scene_model.point_feat_dim
 
-        # --- 5. 核心架构选择 (The "Brain" of the Denoiser) ---
-        # 这是整个模型最核心的部分，根据配置文件选择不同的网络结构来执行去噪任务
+        ## model architecture
         self.arch = cfg.arch
         if self.arch == 'MLP':
             self.arch_cfg = cfg.arch_mlp
@@ -686,16 +459,8 @@ class CDM(nn.Module):
         elif self.arch == 'PointTransV2':
             self.arch_cfg = cfg.arch_pointtrans
             CONTACT_MODEL = ContactPointTransV2
-        # ================= 您新增的分支 =================
-        elif self.arch == 'ContactPerceiverWithMamba':
-            self.arch_cfg = cfg.arch_perceiver_with_mamba
-            CONTACT_MODEL = ContactPerceiverWithMamba
-        # ===============================================
         else:
             raise NotImplementedError
-
-        # --- 6. 实例化核心模型 ---
-        # 根据上面的选择，创建核心去噪模型的实例
         self.contact_model = CONTACT_MODEL(
             self.arch_cfg,
             contact_dim=self.contact_dim,
@@ -704,28 +469,22 @@ class CDM(nn.Module):
             time_emb_dim=self.time_emb_dim
         )
 
-        # --- 7. 最终输出层 ---
-        # 一个线性层，负责将核心模型的输出特征映射回 Affordance Map 的原始维度
         self.contact_layer = nn.Linear(self.arch_cfg.last_dim, self.contact_dim, bias=True)
 
     def forward(self, x, timesteps, **kwargs):
-        """
-        模型的前向传播函数，定义了一次完整的去噪步骤。
+        """ Forward pass of the model.
         
         Args:
-            x: 带噪声的输入接触图 (input contact map), 形状 [bs, num_points, contact_dim]
-            timesteps: 当前的扩散时间步 t
-            **kwargs: 包含所有其他条件信息的字典，如 c_text, c_pc_xyz 等
+            x: input contact map, [bs, num_points, contact_dim]
+            kwargs: other inputs, e.g., text, etc.
         
         Returns:
-            去噪一步后的接触图, 形状 [bs, num_points, contact_dim]
+            Output contact map, [bs, num_points, contact_dim]
         """
-        # --- 步骤A：准备所有条件嵌入 (Prepare Conditional Embeddings) ---
-
-        # 1. 编码时间步
+        ## time embedding
         time_emb = self.timestep_embedder(timesteps) # [bs, 1, time_emb_dim]
 
-        # 2. 编码文本指令
+        ## text embedding
         if self.text_feat_type == 'clip':
             text_emb = encode_text_clip(self.text_model, kwargs['c_text'], max_length=self.text_max_length, device=self.device)
         elif self.text_feat_type == 'bert':
@@ -734,28 +493,21 @@ class CDM(nn.Module):
             raise NotImplementedError
         text_emb = text_emb.unsqueeze(1).detach().float()  # [bs, 1, text_feat_dim]
 
-        # 3. 编码场景信息 (获取场景点特征)
+        ## scene embedding
         if not hasattr(self, 'scene_model'):
-            # 如果没有配置专门的场景模型，则直接使用传入的特征
             if self.point_feat_dim == 0:
                 pc_emb = None
             elif self.point_feat_dim == 1:
                 if kwargs['c_pc_feat'].shape[-1] == 1:
                     pc_emb = kwargs['c_pc_feat']
                 else:
-                    # 通过与文本特征做点积来计算一个单维度的特征
                     pc_emb = einsum(kwargs['c_pc_feat'], text_emb, 'b n d, b m d -> b n m') # [bs, num_points, 1]
             else:
                 pc_emb = kwargs['c_pc_feat'] # [bs, num_points, 768]
         else:
-            # 如果配置了场景模型，则用它来提取深度特征
             pc_emb = self.scene_model((kwargs['c_pc_xyz'], kwargs['c_pc_feat'])).detach() # [bs, num_points, point_feat_dim]
 
-        # --- 步骤B：调用核心模型进行去噪 ---
-        # 将带噪输入x和所有条件嵌入都送入核心模型，比如ContactPerceiverWithMamba
-        x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # 输出形状: [bs, num_points, last_dim]
-        
-        # --- 步骤C：通过输出层得到最终结果 ---
-        x = self.contact_layer(x) # 映射回目标维度: [bs, num_points, contact_dim]
+        x = self.contact_model(x, pc_emb, text_emb, time_emb, **kwargs) # [bs, num_points, last_dim]
+        x = self.contact_layer(x) # [bs, num_points, contact_dim]
 
         return x
