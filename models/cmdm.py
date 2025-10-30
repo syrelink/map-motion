@@ -8,6 +8,7 @@ from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
 from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
+from models.mamba_trans import MambaVisionMixer
 
 # 使用 @Model.register() 装饰器，这是一种常见的设计模式，用于将该模型类注册到一个全局的模型注册表中，
 # 这样就可以通过配置文件中的字符串名称来方便地实例化该模型。
