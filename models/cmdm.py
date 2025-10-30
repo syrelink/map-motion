@@ -361,7 +361,6 @@ class CMDM(nn.Module):
             
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
-            return x
         else:
             raise NotImplementedError
 
