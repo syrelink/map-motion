@@ -22,28 +22,14 @@ text_model:
   version: 'ViT-B/32'
   max_length: 32
 
-# # model architecture
-# arch: 'trans_enc'
-# latent_dim: 512
-# mask_motion: true
-# num_layers: [1,1,1,1,1]
-# num_heads: 8
-# dropout: 0.1
-# dim_feedforward: 1024
-
-# model architecture
-arch: 'trans_wkv'          # 架构名称改为我们设计的 'trans_dec'
-latent_dim: 512            # 模型的核心维度，保持不变
-mask_motion: true          # 保持不变，交叉注意力部分依然需要它
-
-# --- 核心结构参数 ---
-num_layers: [1,1,1,1,1]    # 模型的层级结构，保持不变
-dropout: 0.1               # 正则化参数，保持不变
-
-# --- 交叉注意力 (Transformer Decoder Layer) 参数 ---
-num_heads: 8               # 交叉注意力的头数，保持不变
-dim_feedforward: 1024      # 交叉注意力中FFN的维度，保持不变
-
-# --- 自注意力 (WKV Block_time) 新增参数 ---
-wkv_hidden_rate: 4         # WKV中ChannelMix (FFN) 的维度倍率 (512 * 4 = 2048)
-wkv_init_mode: 'fancy'     # WKV的权重初始化策略，推荐使用 'fancy'
+## model architecture
+arch: 'trans_enc'
+latent_dim: 512
+mask_motion: true
+num_layers: [1,1,1,1,1]
+num_heads: 8
+dropout: 0.1
+dim_feedforward: 1024
+mamba_d_state: 32
+mamba_d_conv: 5
+mamba_expand: 4

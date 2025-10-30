@@ -90,8 +90,10 @@ class ContactPerceiver(nn.Module):
     def __init__(self, arch_cfg: DictConfig, contact_dim: int, point_feat_dim: int, text_feat_dim: int, time_emb_dim: int) -> None:
         super().__init__()
 
+        # 是否使用点的XYZ坐标作为额外的位置特征
         self.point_pos_emb = arch_cfg.point_pos_emb
 
+        # --- 从配置文件中读取编码器的超参数 ---
         self.encoder_q_input_channels = arch_cfg.encoder_q_input_channels
         self.encoder_kv_input_channels = arch_cfg.encoder_kv_input_channels
         self.encoder_num_heads = arch_cfg.encoder_num_heads
@@ -100,6 +102,7 @@ class ContactPerceiver(nn.Module):
         self.encoder_residual_dropout = arch_cfg.encoder_residual_dropout
         self.encoder_self_attn_num_layers = arch_cfg.encoder_self_attn_num_layers
         
+        # --- 从配置文件中读取解码器的超参数 ---
         self.decoder_q_input_channels = arch_cfg.decoder_q_input_channels
         self.decoder_kv_input_channels = arch_cfg.decoder_kv_input_channels
         self.decoder_num_heads = arch_cfg.decoder_num_heads
@@ -107,24 +110,31 @@ class ContactPerceiver(nn.Module):
         self.decoder_dropout = arch_cfg.decoder_dropout
         self.decoder_residual_dropout = arch_cfg.decoder_residual_dropout
 
+        # --- 定义适配器（线性层），用于统一不同输入的特征维度 ---
+        # 语言特征适配器
         self.language_adapter = nn.Linear(
             text_feat_dim,
-            self.encoder_q_input_channels,
+            self.encoder_q_input_channels, # 映射到编码器Query的维度
             bias=True)
+        # 时间嵌入适配器
         self.time_embedding_adapter = nn.Linear(
             time_emb_dim,
-            self.encoder_q_input_channels,
+            self.encoder_q_input_channels, # 映射到编码器Query的维度
             bias=True)
 
+        # 编码器输入适配器（用于点云侧）
         self.encoder_adapter = nn.Linear(
             contact_dim + point_feat_dim + (3 if self.point_pos_emb else 0), 
-            self.encoder_kv_input_channels,
+            self.encoder_kv_input_channels, # 映射到编码器Key/Value的维度
             bias=True)
+        # 解码器输入适配器（用于点云侧）
         self.decoder_adapter = nn.Linear(
             self.encoder_kv_input_channels,
-            self.decoder_q_input_channels,
+            self.decoder_q_input_channels, # 映射到解码器Query的维度
             bias=True)
 
+        # --- 定义核心的注意力模块 ---
+        # 编码器交叉注意力层：从点云(KV)中提取信息到潜藏数组(Q)
         self.encoder_cross_attn = CrossAttentionLayer(
             num_heads=self.encoder_num_heads,
             num_q_input_channels=self.encoder_q_input_channels,
@@ -134,6 +144,7 @@ class ContactPerceiver(nn.Module):
             residual_dropout=self.encoder_residual_dropout,
         )
 
+        # 编码器自注意力模块：在潜藏数组内部进行信息融合和处理
         self.encoder_self_attn = SelfAttentionBlock(
             num_layers=self.encoder_self_attn_num_layers,
             num_heads=self.encoder_num_heads,
@@ -143,6 +154,7 @@ class ContactPerceiver(nn.Module):
             residual_dropout=self.encoder_residual_dropout,
         )
 
+        # 解码器交叉注意力层：将潜藏数组(KV)中的信息广播回每个点(Q)
         self.decoder_cross_attn = CrossAttentionLayer(
             num_heads=self.decoder_num_heads,
             num_q_input_channels=self.decoder_q_input_channels,
@@ -153,36 +165,49 @@ class ContactPerceiver(nn.Module):
         )
 
     def forward(self, x: torch.Tensor, point_feat: torch.Tensor, language_feat: torch.Tensor, time_embedding: torch.Tensor, **kwargs) -> torch.Tensor:
-        """ Forward pass of the ContactMLP.
+        """ 
+        ContactPerceiver 的前向传播过程。
 
         Args:
-            x: input contact map, [bs, num_points, contact_dim]
-            point_feat: [bs, num_points, point_feat_dim]
-            language_feat: [bs, 1, language_feat_dim]
-            time_embedding: [bs, 1, time_embedding_dim]
+            x: 输入的带噪声的接触图, [bs, num_points, contact_dim]
+            point_feat: 场景点云的特征, [bs, num_points, point_feat_dim]
+            language_feat: 文本描述的特征, [bs, 1, language_feat_dim]
+            time_embedding: 扩散时间步的特征, [bs, 1, time_embedding_dim]
         
         Returns:
-            Output contact map, [bs, num_points, contact_dim]
+            处理后的逐点特征, [bs, num_points, decoder_q_input_channels]
         """
+        # --- 步骤1: 准备输入 ---
+        # 准备点云侧的输入数据，拼接接触图、点特征、以及可选的点坐标
         if point_feat is not None:
             x = torch.cat([x, point_feat], dim=-1) # [bs, num_points, contact_dim + point_feat_dim]
         if self.point_pos_emb:
             point_pos = kwargs['c_pc_xyz']
             x = torch.cat([x, point_pos], dim=-1) # [bs, num_points, contact_dim + point_feat_dim + 3]
 
-        # encoder
+        # === 编码阶段 (Encoder) ===
+        # 准备编码器的Key/Value：将点云侧数据通过适配器映射到指定维度
         enc_kv = self.encoder_adapter(x) # [bs, num_points, enc_kv_dim]
 
+        # 准备编码器的Query（潜藏数组）：将语言和时间特征分别通过适配器，然后拼接
         language_feat = self.language_adapter(language_feat) # [bs, 1, enc_q_dim]
         time_embedding = self.time_embedding_adapter(time_embedding) # [bs, 1, enc_q_dim]
-        enc_q = torch.cat([language_feat, time_embedding], dim=1) # [bs, 1 + 1, enc_q_dim]
+        enc_q = torch.cat([language_feat, time_embedding], dim=1) # [bs, 2, enc_q_dim]
 
+        # 步骤2：交叉注意力。用Q(语言/时间)从KV(点云)中提取信息，压缩到潜藏空间
         enc_q = self.encoder_cross_attn(enc_q, enc_kv).last_hidden_state
+        
+        # 步骤3：自注意力。在潜藏空间内部进行深度信息交互
         enc_q = self.encoder_self_attn(enc_q).last_hidden_state
 
-        # decoder
-        dec_kv = enc_q
+        # === 解码阶段 (Decoder) ===
+        # 步骤4：准备解码器输入
+        # 解码器的Key/Value是编码器处理后的潜藏数组
+        dec_kv = enc_q 
+        # 解码器的Query是原始的点云侧信息（经过适配器）
         dec_q = self.decoder_adapter(enc_kv) # [bs, num_points, dec_q_dim]
+        
+        # 步骤5：交叉注意力。将潜藏数组(KV)中的全局上下文信息广播回每个点(Q)
         dec_q = self.decoder_cross_attn(dec_q, dec_kv).last_hidden_state # [bs, num_points, dec_q_dim]
 
         return dec_q
