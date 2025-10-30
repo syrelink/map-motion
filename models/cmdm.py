@@ -148,31 +148,31 @@ class CMDM(nn.Module):
             for i, n in enumerate(self.num_layers):
                 # 2. 根据层级索引 i 来决定使用 Mamba 还是 Transformer
                 #    i < 2 表示前两个主要块
+
                 if i < 2:
-                    # 对于前两个块，我们使用 MambaVisionMixer。
-                    # 原始代码中 'n' 表示 TransformerEncoder 内部的层数。
-                    # 一个直接的替换是创建一个包含 n 个 MambaVisionMixer 的序列。
-                    self.sequence_layers.append(
-                        nn.Sequential(*[
-                            MambaVisionMixer(
-                                d_model=self.latent_dim,
-                                d_state=cfg.mamba_d_state,  
-                                d_conv=cfg.mamba_d_conv,   
-                                expand=cfg.mamba_expand,   
-                            ) for _ in range(n)
-                        ]))
-                else:
-                    # 对于后续的块，我们继续使用原来的 TransformerEncoder。
-                    self.sequence_layers.append(
-                        nn.TransformerEncoder(
-                            nn.TransformerEncoderLayer(
-                                d_model=self.latent_dim, nhead=cfg.num_heads,
-                                dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
-                                activation='gelu', batch_first=True,
-                            ),
-                            num_layers=n,
+                    # 对于前两个阶段，创建 'n' 个包含 MambaVisionMixer 的块
+                    for _ in range(n):
+                        mamba_mixer = MambaVisionMixer(
+                            d_model=self.latent_dim,
+                            d_state=cfg.mamba_d_state,
+                            d_conv=cfg.mamba_d_conv,
+                            expand=cfg.mamba_expand,
                         )
-                    )
+                        self.sequence_layers.append(BasicBlock(self.latent_dim, mamba_mixer))
+                else:
+                    # 对于后续阶段，创建 'n' 个包含 TransformerEncoderLayer 的块
+                    # 注意：我们使用 TransformerEncoderLayer, 而不是 TransformerEncoder,
+                    # 因为我们的 BasicBlock 现在负责堆叠和残差连接。
+                    for _ in range(n):
+                        attn_layer = nn.TransformerEncoderLayer(
+                            d_model=self.latent_dim,
+                            nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward,
+                            dropout=cfg.dropout,
+                            activation='gelu',
+                            batch_first=True,
+                        )
+                        self.sequence_layers.append(BasicBlock(self.latent_dim, attn_layer))
 
                 # 2. 交叉注意力层 (Cross-Attention)
                 # 在每个自注意力块之后（除了最后一个），插入交叉注意力块
@@ -319,35 +319,34 @@ class CMDM(nn.Module):
             if self.mask_motion:
                 x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
 
-            for i in range(len(self.num_layers)):
-                # --- 更改开始: 前向传播部分 ---
-                
-                # 获取当前块的序列处理层
-                current_layer = self.sequence_layers[i]
-                
-                # 1. 判断当前层是Mamba块还是Transformer块
-                #    我们用 isinstance 来判断，这里判断它的第一个子模块是否为MambaVisionMixer
-                is_mamba_block = isinstance(current_layer, nn.Sequential)
+            # 1. 初始化一个索引来追踪扁平化的 sequence_layers 列表
+            current_layer_idx = 0
 
-                if is_mamba_block:
-                    # 如果是Mamba块，直接传入 x
-                    x = current_layer(x)
-                    # 关键步骤：手动应用掩码，将填充位置的输出置零
-                    if x_mask is not None:
-                        # x_mask 中 True 代表要被忽略的padding位置。
-                        # 我们需要一个值为0/1的掩码用于乘法。
-                        # `~x_mask` 将 True/False 反转。
-                        # `unsqueeze(-1)` 扩展维度以匹配 x 的特征维度。
-                        # `float()` 转换为 0.0 和 1.0。
-                        inverse_mask = (~x_mask).unsqueeze(-1).float()
-                        x = x * inverse_mask
-                else:
-                    # 如果是Transformer块，按原样传入 x 和掩码
-                    x = current_layer(x, src_key_padding_mask=x_mask)
-
-                # --- 更改结束: 前向传播部分 ---
+            # 2. 外层循环遍历“阶段”信息 (阶段索引 i, 该阶段的层数 n)
+            for i, n in enumerate(self.num_layers):
                 
-                # 交叉注意力部分保持完全不变
+                # 3. 内层循环处理当前阶段的 n 个序列处理层
+                for _ in range(n):
+                    # 从扁平列表中获取当前要处理的层
+                    layer = self.sequence_layers[current_layer_idx]
+                    
+                    # 检查 BasicBlock 内部的混合器是 Mamba 还是 Transformer
+                    is_mamba_block = isinstance(layer.mixer, MambaVisionMixer)
+
+                    if is_mamba_block:
+                        # Mamba 块不接受掩码，处理后手动应用
+                        x = layer(x)
+                        if x_mask is not None:
+                            inverse_mask = (~x_mask).unsqueeze(-1).float()
+                            x = x * inverse_mask
+                    else: # 如果是 Transformer 块
+                        # 将填充掩码传递给 BasicBlock 内部的 Transformer 层
+                        x = layer(x, src_key_padding_mask=x_mask)
+                    
+                    # 移动到扁平列表中的下一个层
+                    current_layer_idx += 1
+
+                # 4. 在每个阶段的序列层处理完毕后，执行交叉注意力 (除了最后一个阶段)
                 if i != len(self.num_layers) - 1:
                     mem = cont_emb[i]
                     mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
@@ -358,6 +357,8 @@ class CMDM(nn.Module):
                     
                     mem = self.kv_mappling_layers[i](mem)
                     x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
+                    
+            # ====> 关键修改结束 <====
             
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]

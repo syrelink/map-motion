@@ -128,56 +128,26 @@ class MambaVisionMixer(nn.Module):
 
 
 
-class MambaTransHybridLayer(nn.Module):
+class BasicBlock(nn.Module):
     """
-    一个混合层，结合了 MambaVisionMixer 和 Transformer 的前馈网络。
-    结构: MambaBlock -> FFNBlock
+    一个基础构建块，实现了 MambaVision 论文中描述的前置归一化结构 (公式6)。
+    模式: Input -> LayerNorm -> Mixer -> Residual Connection
     """
-    def __init__(self, d_model, dim_feedforward=2048, dropout=0.1, 
-                 d_state=16, d_conv=4, expand=2):
+    def __init__(self, d_model, mixer_layer):
+        """
+        参数:
+            d_model (int): 模型的特征维度。
+            mixer_layer (nn.Module): 令牌混合层 (例如 MambaVisionMixer 或 Transformer 层)。
+        """
         super().__init__()
-        
-        # --- Mamba 模块部分 (替换自注意力) ---
-        self.norm1 = nn.LayerNorm(d_model)
-        self.mamba_mixer = MambaVisionMixer(
-            d_model=d_model,
-            d_state=d_state,
-            d_conv=d_conv,
-            expand=expand
-        )
-        self.dropout1 = nn.Dropout(dropout)
+        self.norm = nn.LayerNorm(d_model)
+        self.mixer = mixer_layer
 
-        # --- FFN 模块部分 (与 Transformer 保持一致) ---
-        self.norm2 = nn.LayerNorm(d_model)
-        self.ffn = nn.Sequential(
-            nn.Linear(d_model, dim_feedforward),
-            nn.GELU(),
-            nn.Dropout(dropout),
-            nn.Linear(dim_feedforward, d_model)
-        )
-        self.dropout2 = nn.Dropout(dropout)
-
-    def forward(self, x):
+    def forward(self, x, **kwargs):
         """
-        前向传播，采用 Pre-Norm 结构。
-        
-        Args:
-            x (Tensor): 输入张量，形状为 (B, L, D)
-        
-        Returns:
-            Tensor: 输出张量，形状为 (B, L, D)
+        带有残差连接的前向传播。
+        **kwargs 会被传递给 mixer_layer (例如，用于 attention 的掩码)。
         """
-        # Mamba 模块 + 第一个残差连接
-        x_res = x
-        x = self.norm1(x)
-        x = self.mamba_mixer(x)
-        x = x_res + self.dropout1(x)
-        
-        # FFN 模块 + 第二个残差连接
-        x_res = x
-        x = self.norm2(x)
-        x = self.ffn(x)
-        x = x_res + self.dropout2(x)
-        
-        return x
-
+        # 残差连接在块处理之前与结果相加
+        # 对应公式: x + Mixer(Norm(x))
+        return x + self.mixer(self.norm(x), **kwargs)
