@@ -158,7 +158,6 @@ class CMDM(nn.Module):
                                 d_state=cfg.mamba_d_state,  
                                 d_conv=cfg.mamba_d_conv,   
                                 expand=cfg.mamba_expand,   
-                                # ... 其他参数
                             ) for _ in range(n)
                         ]))
                 else:

@@ -7,7 +7,6 @@ from timm.models.vision_transformer import Mlp
 from timm.models.layers import DropPath
 from mamba_ssm.ops.selective_scan_interface import selective_scan_fn
 from einops import rearrange, repeat
-from mamba_trans import *
 import math
 
 
