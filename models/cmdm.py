@@ -48,6 +48,9 @@ class CMDM(nn.Module):
         elif self.arch == 'trans_dec':
             # Transformer Decoder 架构：场景编码器输出多层次的特征，用于交叉注意力
             SceneMapModule = SceneMapEncoderDecoder
+        elif self.arch == 'trans_mambaTrans':
+            # Transformer Decoder 架构：场景编码器输出多层次的特征，用于交叉注意力
+            SceneMapModule = SceneMapEncoderDecoder
         else:
             raise NotImplementedError(f"不支持的架构: {self.arch}")
         
