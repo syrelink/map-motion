@@ -108,6 +108,7 @@ class CMDM(nn.Module):
             self.self_attn_layers = nn.ModuleList()
             self.kv_mappling_layers = nn.ModuleList() # 将接触特征映射为 key 和 value
             self.cross_attn_layers = nn.ModuleList()
+            # 这里的num_layers = [1,1,1,1,1]
             for i, n in enumerate(self.num_layers):
                 # 1. 自注意力层 (Self-Attention)
                 # 处理 [时间, 文本, 运动] 序列
@@ -141,54 +142,62 @@ class CMDM(nn.Module):
                         )
                     )
         elif self.arch == 'trans_mambaTrans':
-            # 对于 Decoder 架构，模型包含自注意力和交叉注意力层
-            self.sequence_layers = nn.ModuleList()
-            self.kv_mappling_layers = nn.ModuleList() # 将接触特征映射为 key 和 value
+            # 1. 创建 *两个* 模块列表
+            self.self_mamba_block = nn.ModuleList()  # 仅用于 i = 0
+            self.self_attn_layers = nn.ModuleList() # 用于 i > 0
+            
+            self.kv_mappling_layers = nn.ModuleList() 
             self.cross_attn_layers = nn.ModuleList()
+            
+            # 这里的num_layers = [1,1,1,1,1]
+            total_layers = len(self.num_layers)
+            dpr = [x.item() for x in torch.linspace(0, 0.1, total_layers)] # Drop path rates
+
             for i, n in enumerate(self.num_layers):
-                # 2. 根据层级索引 i 来决定使用 Mamba 还是 Transformer
-                #    i < 2 表示前两个主要块
-
-                if i < 2:
-                    # 对于前两个阶段，创建 'n' 个包含 MambaVisionMixer 的块
-                    for _ in range(n):
-                        mamba_mixer = MambaVisionMixer(
-                            d_model=self.latent_dim,
-                            d_state=cfg.mamba_d_state,
-                            d_conv=cfg.mamba_d_conv,
-                            expand=cfg.mamba_expand,
+                
+                # 2. 条件化创建模块
+                if i == 0:
+                    # --- 当 i == 0 时: 创建 Mamba 块 ---
+                    # (这是我们之前讨论过的 ResidualHybridBlock)
+                    self.self_mamba_block.append(
+                        MambaTransBackbone(
+                            num_layers=1,
+                            latent_dim=self.latent_dim,
+                            num_heads=4,
+                            ff_size=1024,
+                            dropout=0.1,
+                            drop_path_rate=0.1
                         )
-                        self.sequence_layers.append(BasicBlock(self.latent_dim, mamba_mixer))
+                    )
                 else:
-                    # 对于后续阶段，创建 'n' 个包含 TransformerEncoderLayer 的块
-                    # 注意：我们使用 TransformerEncoderLayer, 而不是 TransformerEncoder,
-                    # 因为我们的 BasicBlock 现在负责堆叠和残差连接。
-                    for _ in range(n):
-                        attn_layer = nn.TransformerEncoderLayer(
-                            d_model=self.latent_dim,
-                            nhead=cfg.num_heads,
-                            dim_feedforward=cfg.dim_feedforward,
-                            dropout=cfg.dropout,
-                            activation='gelu',
-                            batch_first=True,
+                    # --- 当 i > 0 时: 创建 Transformer 块 ---
+                    # (这是您原始的 TransformerEncoder)
+                    self.self_attn_layers.append(
+                        nn.TransformerEncoder(
+                            nn.TransformerEncoderLayer(
+                                d_model=self.latent_dim, nhead=num_heads,
+                                dim_feedforward=ff_size, dropout=dropout,
+                                activation='gelu', batch_first=True,
+                            ),
+                            num_layers=n, # n=1
                         )
-                        self.sequence_layers.append(BasicBlock(self.latent_dim, attn_layer))
+                    )
 
-                # 2. 交叉注意力层 (Cross-Attention)
+                # 3. 交叉注意力层 (逻辑不变)
                 # 在每个自注意力块之后（除了最后一个），插入交叉注意力块
-                if i != len(self.num_layers) - 1:
-                    # 接触特征适配器，用于生成交叉注意力的 key 和 value
+                if i != len(self.num_layers) - 1: # i = 0, 1, 2, 3
+                    # 接触特征适配器
                     self.kv_mappling_layers.append(
                         nn.Sequential(
                             nn.Linear(self.planes[-1-i], self.latent_dim, bias=True),
                             nn.LayerNorm(self.latent_dim),
                         )
                     )
-                    # 交叉注意力层，其中 query 来自运动序列，key/value 来自接触信息
+                    # 交叉注意力层
                     self.cross_attn_layers.append(
                         nn.TransformerDecoderLayer(
-                            d_model=self.latent_dim, nhead=cfg.num_heads,
-                            dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
+                            d_model=self.latent_dim, nhead=num_heads,
+                            dim_feedforward=ff_size, dropout=dropout,
                             activation='gelu', batch_first=True,
                         )
                     )
@@ -312,54 +321,85 @@ class CMDM(nn.Module):
 
         # 该分支 'trans_mambaTrans' 的逻辑与 'trans_dec' 相同，可能是为未来扩展保留的
         elif self.arch == 'trans_mambaTrans':
-            x = torch.cat([time_emb, text_emb, x], dim=1)
+            """
+            这是为 'trans_mambaTrans' 架构修改后的 forward 函数。
+            
+            参数:
+            time_emb, text_emb, x: 要拼接的序列
+            time_mask, text_mask: 对应的掩码
+            cont_emb: 来自 U-Net 的接触特征列表 [mem_0, mem_1, mem_2, mem_3]
+            kwargs: 包含 'x_mask', 'c_pc_mask' 等
+            """
+            
+            # --- 1. 输入准备 (与 'trans_dec' 相同) ---
+            
+            # 拼接序列：[时间, 文本, 运动]
+            x = torch.cat([time_emb, text_emb, x], dim=1) # [bs, 1 + text_len + seq_len, latent_dim]
+            # 添加位置编码 (假设 self.positional_encoder 期望 batch_first=False)
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
 
             x_mask = None
             if self.mask_motion:
+                # 拼接对应的掩码
+                # 假设 x_mask, time_mask, text_mask 都是 (B, S)
                 x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
-
-            # 1. 初始化一个索引来追踪扁平化的 sequence_layers 列表
-            current_layer_idx = 0
-
-            # 2. 外层循环遍历“阶段”信息 (阶段索引 i, 该阶段的层数 n)
-            for i, n in enumerate(self.num_layers):
                 
-                # 3. 内层循环处理当前阶段的 n 个序列处理层
-                for _ in range(n):
-                    # 从扁平列表中获取当前要处理的层
-                    layer = self.sequence_layers[current_layer_idx]
+            
+            # --- 2. 核心循环 (修改点) ---
+            
+            # 依次通过自处理和交叉注意力层
+            for i in range(len(self.num_layers)): # 循环 5 次 (i = 0, 1, 2, 3, 4)
+                
+                # --- 2a. 自处理层 (Mamba 或 Transformer) ---
+                
+                if i == 0:
+                    # --- 第一层 (i=0): 调用 MambaTransBackbone ---
                     
-                    # 检查 BasicBlock 内部的混合器是 Mamba 还是 Transformer
-                    is_mamba_block = isinstance(layer.mixer, MambaVisionMixer)
-
-                    if is_mamba_block:
-                        # Mamba 块不接受掩码，处理后手动应用
-                        x = layer(x)
-                        if x_mask is not None:
-                            inverse_mask = (~x_mask).unsqueeze(-1).float()
-                            x = x * inverse_mask
-                    else: # 如果是 Transformer 块
-                        # 将填充掩码传递给 BasicBlock 内部的 Transformer 层
-                        x = layer(x, src_key_padding_mask=x_mask)
+                    # !! 关键假设 !!
+                    # 这里的代码 *必须* 依赖您对 MambaTransBackbone.forward 的修改：
+                    # 1. 它的 forward 接受 (B, S, C) batch_first 输入
+                    # 2. 它的 forward 接受 src_key_padding_mask
+                    # 3. 它的 forward 在 *内部* 手动应用掩码 (masked_fill)
                     
-                    # 移动到扁平列表中的下一个层
-                    current_layer_idx += 1
+                    x = self.self_mamba_block[0](x, src_key_padding_mask=x_mask)
+                    
+                else:
+                    # --- 其他层 (i > 0): 调用 TransformerEncoder ---
+                    # nn.TransformerEncoder (batch_first=True) 可以直接接收 src_key_padding_mask
+                    # self.self_attn_layers 的索引是从 0 开始的 (对应 i=1, 2, 3, 4)
+                    # 所以我们用索引 [i-1]
+                    x = self.self_attn_layers[i-1](x, src_key_padding_mask=x_mask)
 
-                # 4. 在每个阶段的序列层处理完毕后，执行交叉注意力 (除了最后一个阶段)
-                if i != len(self.num_layers) - 1:
-                    mem = cont_emb[i]
-                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                
+                # --- 2b. 交叉注意力层 (与 'trans_dec' 相同) ---
+                
+                # 在每个自处理块之后（除了最后一个），插入交叉注意力块
+                if i != len(self.num_layers) - 1: # (i = 0, 1, 2, 3)
+                    mem = cont_emb[i] # 获取当前层次的接触特征作为 memory
+                    
+                    # 准备 memory mask
+                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=x.device)
                     if 'c_pc_mask' in kwargs:
-                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].repeat(1, mem_mask.shape[1]))
+                        # (注意: 您的原始 'trans_dec' 代码中，c_pc_mask.repeat 的维度可能需要检查)
+                        # 假设 c_pc_mask 形状为 (B, 1) 或 (B, mem.shape[1])
+                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'])
+                    
                     if 'c_pc_erase' in kwargs:
                         mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
                     
+                    # 将 memory 映射到隐空间维度
                     mem = self.kv_mappling_layers[i](mem)
-                    x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
                     
-            # ====> 关键修改结束 <====
+                    # 执行交叉注意力，x 是 query, mem 是 key 和 value
+                    # (self.cross_attn_layers[i] 是 nn.TransformerDecoderLayer)
+                    x = self.cross_attn_layers[i](x, mem, 
+                                                tgt_key_padding_mask=x_mask, 
+                                                memory_key_padding_mask=mem_mask)
             
+            
+            # --- 3. 输出处理 (与 'trans_dec' 相同) ---
+            
+            # 从输出序列中提取出属于运动的部分
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
         else:
