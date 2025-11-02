@@ -138,23 +138,11 @@ class MambaTransBackbone(nn.Module):
             )
 
     def forward(self, x, src_key_padding_mask=None):
-            # x 原始形状: (S, B, C) - 这是 MambaTransBackbone 的输入格式
-            # x_mask 形状: (B, S) - 这是 padding mask
-            
-            # 1. 切换到 Batch-First (B, S, C) 以便应用掩码
-            x = x.permute(1, 0, 2) 
+        x = x.permute(1, 0, 2)
+        for blk in self.blocks:
+            # 简化后的全局注意力暂不处理 mask
+            x = blk(x)
+        x = x.permute(1, 0, 2)
+        return x
 
-            # 2. 手动应用掩码
-            if src_key_padding_mask is not None:
-                # 将 x_mask (B, S) 扩展为 (B, S, 1)
-                # masked_fill_ 在掩码为 True 的地方填充 0.0
-                x = x.masked_fill(src_key_padding_mask.unsqueeze(-1), 0.0)
-
-            for blk in self.blocks:
-                # blk (ResidualHybridBlock) 期望 (B, S, C) 格式的输入
-                x = blk(x)
-            
-            # 3. 切换回 Time-First (S, B, C) 以匹配 Transformer 的输出格式
-            x = x.permute(1, 0, 2) 
-            return x
 
