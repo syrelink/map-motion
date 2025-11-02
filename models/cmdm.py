@@ -331,17 +331,14 @@ class CMDM(nn.Module):
             kwargs: 包含 'x_mask', 'c_pc_mask' 等
             """
             
-            # --- 1. 输入准备 (与 'trans_dec' 相同) ---
-            
             # 拼接序列：[时间, 文本, 运动]
             x = torch.cat([time_emb, text_emb, x], dim=1) # [bs, 1 + text_len + seq_len, latent_dim]
-            # 添加位置编码 (假设 self.positional_encoder 期望 batch_first=False)
+            # 添加位置编码
             x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
 
             x_mask = None
             if self.mask_motion:
                 # 拼接对应的掩码
-                # 假设 x_mask, time_mask, text_mask 都是 (B, S)
                 x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1)
                 
             
@@ -374,27 +371,19 @@ class CMDM(nn.Module):
                 # --- 2b. 交叉注意力层 (与 'trans_dec' 相同) ---
                 
                 # 在每个自处理块之后（除了最后一个），插入交叉注意力块
-                if i != len(self.num_layers) - 1: # (i = 0, 1, 2, 3)
+                if i != len(self.num_layers) - 1:
                     mem = cont_emb[i] # 获取当前层次的接触特征作为 memory
-                    
-                    # 准备 memory mask
-                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=x.device)
+                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                    # (可选) 应用额外的场景掩码
                     if 'c_pc_mask' in kwargs:
-                        # (注意: 您的原始 'trans_dec' 代码中，c_pc_mask.repeat 的维度可能需要检查)
-                        # 假设 c_pc_mask 形状为 (B, 1) 或 (B, mem.shape[1])
-                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'])
-                    
+                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].repeat(1, mem_mask.shape[1]))
                     if 'c_pc_erase' in kwargs:
                         mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
                     
                     # 将 memory 映射到隐空间维度
                     mem = self.kv_mappling_layers[i](mem)
-                    
                     # 执行交叉注意力，x 是 query, mem 是 key 和 value
-                    # (self.cross_attn_layers[i] 是 nn.TransformerDecoderLayer)
-                    x = self.cross_attn_layers[i](x, mem, 
-                                                tgt_key_padding_mask=x_mask, 
-                                                memory_key_padding_mask=mem_mask)
+                    x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
             
             
             # --- 3. 输出处理 (与 'trans_dec' 相同) ---
