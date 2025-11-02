@@ -196,8 +196,8 @@ class CMDM(nn.Module):
                     # 交叉注意力层
                     self.cross_attn_layers.append(
                         nn.TransformerDecoderLayer(
-                            d_model=self.latent_dim, nhead=num_heads,
-                            dim_feedforward=ff_size, dropout=dropout,
+                            d_model=self.latent_dim, nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
                             activation='gelu', batch_first=True,
                         )
                     )
