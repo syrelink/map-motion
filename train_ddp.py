@@ -89,7 +89,7 @@ def main(cfg: DictConfig) -> None:
     # 使用 DistributedDataParallel (DDP) 对模型进行包装，这是实现多GPU数据并行的标准方法。
     # 它负责将数据分发到不同GPU，并在反向传播时同步梯度。
     model = torch.nn.parallel.DistributedDataParallel(
-        model, device_ids=[cfg.gpu], output_device=cfg.gpu, find_unused_parameters=True, broadcast_buffers=False)
+        model, device_ids=[cfg.gpu], output_device=cfg.gpu, find_unused_parameters=False, broadcast_buffers=False)
 
     # --- 5. 实例化并启动训练循环 ---
     # 创建 TrainLoop 类的实例。这个类封装了整个训练过程的循环逻辑。

@@ -7,6 +7,7 @@ import math
 
 import torch as th
 import torch.nn as nn
+from torch.amp import custom_fwd, custom_bwd
 
 
 # PyTorch 1.7 has SiLU, but we support PyTorch 1.5.
@@ -147,7 +148,7 @@ def checkpoint(func, inputs, params, flag):
 
 class CheckpointFunction(th.autograd.Function):
     @staticmethod
-    @th.cuda.amp.custom_fwd
+    @th.amp.custom_fwd(device_type='cuda')
     def forward(ctx, run_function, length, *args):
         ctx.run_function = run_function
         ctx.input_length = length
@@ -157,7 +158,7 @@ class CheckpointFunction(th.autograd.Function):
         return output_tensors
 
     @staticmethod
-    @th.cuda.amp.custom_bwd
+    @th.amp.custom_bwd(device_type='cuda')
     def backward(ctx, *output_grads):
         args = list(ctx.saved_tensors)
 

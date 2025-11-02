@@ -41,7 +41,7 @@ if 'x070' in os.environ["RWKV_MY_TESTING"]:
     CHUNK_LEN = 16
 
     flags = ['-res-usage', f'-D_C_={HEAD_SIZE}', f"-D_CHUNK_LEN_={CHUNK_LEN}", "--use_fast_math", "-O3", "-Xptxas -O3", "--extra-device-vectorization"]
-    load(name="wind_backstepping", sources=[f'cuda/wkv7_cuda.cu', 'cuda/wkv7_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
+    load(name="wind_backstepping", sources=[f'/home/supermicro/syr/afford-motion/models/tools/cuda/wkv7_cuda.cu', '/home/supermicro/syr/afford-motion/models/tools/cuda/wkv7_op.cpp'], is_python_module=False, verbose=True, extra_cuda_cflags=flags)
 
     class WindBackstepping(torch.autograd.Function):
         @staticmethod
