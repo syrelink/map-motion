@@ -175,11 +175,11 @@ class CMDM(nn.Module):
                     self.self_attn_layers.append(
                         nn.TransformerEncoder(
                             nn.TransformerEncoderLayer(
-                                d_model=self.latent_dim, nhead=num_heads,
-                                dim_feedforward=ff_size, dropout=dropout,
+                                d_model=self.latent_dim, nhead=cfg.num_heads,
+                                dim_feedforward=cfg.dim_feedforward, dropout=cfg.dropout,
                                 activation='gelu', batch_first=True,
                             ),
-                            num_layers=n, # n=1
+                            num_layers=n,
                         )
                     )
 
