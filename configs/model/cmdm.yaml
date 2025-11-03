@@ -30,6 +30,3 @@ num_layers: [1,1,1,1,1]
 num_heads: 8
 dropout: 0.1
 dim_feedforward: 1024
-mamba_d_state: 32
-mamba_d_conv: 5
-mamba_expand: 4

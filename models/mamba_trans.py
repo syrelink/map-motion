@@ -129,7 +129,7 @@ class MambaTransBackbone(nn.Module):
                     dim=latent_dim,
                     num_heads=num_heads,
                     window_size=0,  # 设为0或移除
-                    is_transformer_layer=False,
+                    is_transformer_layer=is_transformer,
                     mlp_ratio=ff_size / latent_dim if latent_dim > 0 else 4.0,
                     drop=dropout,
                     attn_drop=dropout,
