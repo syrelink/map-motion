@@ -117,12 +117,13 @@ class ResidualHybridBlock(nn.Module):
 class MambaTransBackbone(nn.Module):
     def __init__(self, num_layers, latent_dim, num_heads, ff_size, dropout=0.1, drop_path_rate=0.1):
         super().__init__()
-        # num_mamba_layers = num_layers // 2
-        num_mamba_layers = int(num_layers * 0.75)
+        num_mamba_layers = 1 
+        # num_mamba_layers = int(num_layers * 0.75)
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, num_layers)]
         self.blocks = nn.ModuleList()
         for i in range(num_layers):
             is_transformer = i >= num_mamba_layers
+            print('trans:'+is_transformer)
             self.blocks.append(
                 # 注意：由于动作数据是一维的，window_size 参数在此简化版中不再需要
                 ResidualHybridBlock(

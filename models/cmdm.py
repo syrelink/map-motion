@@ -9,6 +9,7 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
 from models.mamba_trans import *
+from models import vrwkv
 
 
 # 使用 @Model.register() 装饰器，这是一种常见的设计模式，用于将该模型类注册到一个全局的模型注册表中，
@@ -49,6 +50,9 @@ class CMDM(nn.Module):
             # 添加一个线性层，将场景特征的维度映射到模型的隐状态维度
             self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
         elif self.arch == 'trans_mamba':
+            SceneMapModule = SceneMapEncoder
+            self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
+        elif self.arch == 'trans_rwkv':
             SceneMapModule = SceneMapEncoder
             self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
         elif self.arch == 'trans_dec':
@@ -117,7 +121,30 @@ class CMDM(nn.Module):
                 enable_nested_tensor=False,  # 推荐设置为 False 以支持 padding mask
                 num_layers=sum(cfg.num_layers),
             )
-
+        elif self.arch == 'trans_rwkv':
+            # 对于 Encoder 架构，使用一个标准的 nn.TransformerEncoder
+            # 所有输入（时间、文本、接触、运动）被拼接成一个长序列进行处理
+            # self.self_attn_layer = nn.TransformerEncoder(
+            #     nn.TransformerEncoderLayer(
+            #         d_model=self.latent_dim,
+            #         nhead=cfg.num_heads,
+            #         dim_feedforward=cfg.dim_feedforward,
+            #         dropout=cfg.dropout,
+            #         activation='gelu',
+            #         batch_first=True,  # 输入/输出张量的形状为 [batch, seq, feature]
+            #     ),
+            #     enable_nested_tensor=False,  # 推荐设置为 False 以支持 padding mask
+            #     num_layers=sum(cfg.num_layers),
+            # )
+            self.self_attn_layer = nn.Sequential(
+                    *[Block_time(
+                        n_embd=self.latent_dim,
+                        n_layer=sum(self.num_layers), # 总层数，用于fancy init
+                        layer_id=sum(self.num_layers[:i]) + layer_idx, # 当前块的全局ID
+                        hidden_rate=4, # FFN的隐藏层倍率，可设为超参数
+                        # drop_path, init_values 等参数也可以根据需要添加
+                    ) for layer_idx in range(n)]
+                )
         elif self.arch == 'trans_dec':
             # 对于 Decoder 架构，模型包含自注意力和交叉注意力层
             self.self_attn_layers = nn.ModuleList()
