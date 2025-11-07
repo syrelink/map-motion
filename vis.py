@@ -195,7 +195,7 @@ OUTPUT_VIS_FOLDER = './Visualization' # 最终保存 PLY 文件的目录
 # 启动处理
 process_affordance_files(
     affordance_folder=PRED_CONTACT_FOLDER, 
-    xyz_template_path=os.path.join(DATA_DIR, 'H3D/contacts/{data_id}.npz'),
+    xyz_template_path=os.path.join(DATA_DIR, 'data/H3D/contacts/{data_id}.npz'),
     output_folder=OUTPUT_VIS_FOLDER
 )
 
