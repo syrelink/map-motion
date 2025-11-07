@@ -9,7 +9,7 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
 from models.mamba_trans import *
-from models import vrwkv
+from models.vrwkv import *
 
 
 # 使用 @Model.register() 装饰器，这是一种常见的设计模式，用于将该模型类注册到一个全局的模型注册表中，
@@ -140,10 +140,10 @@ class CMDM(nn.Module):
                     *[Block_time(
                         n_embd=self.latent_dim,
                         n_layer=sum(self.num_layers), # 总层数，用于fancy init
-                        layer_id=sum(self.num_layers[:i]) + layer_idx, # 当前块的全局ID
+                        layer_id=1,
                         hidden_rate=4, # FFN的隐藏层倍率，可设为超参数
                         # drop_path, init_values 等参数也可以根据需要添加
-                    ) for layer_idx in range(n)]
+                    ) ]
                 )
         elif self.arch == 'trans_dec':
             # 对于 Decoder 架构，模型包含自注意力和交叉注意力层
