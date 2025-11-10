@@ -123,7 +123,7 @@ class MambaTransBackbone(nn.Module):
         self.blocks = nn.ModuleList()
         for i in range(num_layers):
             is_transformer = i >= num_mamba_layers
-            print('trans:'+is_transformer)
+            print('trans:',is_transformer)
             self.blocks.append(
                 # 注意：由于动作数据是一维的，window_size 参数在此简化版中不再需要
                 ResidualHybridBlock(
