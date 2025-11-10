@@ -9,7 +9,7 @@ from models.functions import load_and_freeze_clip_model, encode_text_clip, \
     load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
 from utils.misc import compute_repr_dimesion
 from models.mamba_trans import *
-from models import vrwkv
+from models.vrwkv import *
 
 
 # 使用 @Model.register() 装饰器，这是一种常见的设计模式，用于将该模型类注册到一个全局的模型注册表中，
@@ -134,6 +134,7 @@ class CMDM(nn.Module):
                         # init_values, post_norm, key_norm 等高级参数
                         # 也可以在这里从 cfg 传入
                     )
+
                 )
             # 4 将所有块打包成一个 nn.Sequential 模块
             self.self_attn_layer = nn.Sequential(*rwkv_blocks)
