@@ -122,29 +122,31 @@ class CMDM(nn.Module):
                 num_layers=sum(cfg.num_layers),
             )
         elif self.arch == 'trans_rwkv':
-            # 对于 Encoder 架构，使用一个标准的 nn.TransformerEncoder
-            # 所有输入（时间、文本、接触、运动）被拼接成一个长序列进行处理
-            # self.self_attn_layer = nn.TransformerEncoder(
-            #     nn.TransformerEncoderLayer(
-            #         d_model=self.latent_dim,
-            #         nhead=cfg.num_heads,
-            #         dim_feedforward=cfg.dim_feedforward,
-            #         dropout=cfg.dropout,
-            #         activation='gelu',
-            #         batch_first=True,  # 输入/输出张量的形状为 [batch, seq, feature]
-            #     ),
-            #     enable_nested_tensor=False,  # 推荐设置为 False 以支持 padding mask
-            #     num_layers=sum(cfg.num_layers),
-            # )
-            self.self_attn_layer = nn.Sequential(
-                    *[Block_time(
+            rwkv_blocks = []
+            for i in range(sum(cfg.num_layers)):
+                rwkv_blocks.append(
+                    Block_time(
                         n_embd=self.latent_dim,
-                        n_layer=sum(self.num_layers), # 总层数，用于fancy init
-                        layer_id=sum(self.num_layers[:i]) + layer_idx, # 当前块的全局ID
-                        hidden_rate=4, # FFN的隐藏层倍率，可设为超参数
-                        # drop_path, init_values 等参数也可以根据需要添加
-                    ) for layer_idx in range(n)]
+                        n_layer=sum(cfg.num_layers),  # RWKV 'fancy init' 需要总层数
+                        layer_id=i,           # 当前层的 ID (从 0 到 total_depth-1)
+                        hidden_rate=cfg.dim_feedforward // self.latent_dim,
+                        drop_path=cfg.dropout, # 复用 cfg 中的 dropout 作为 drop_path
+                        # init_values, post_norm, key_norm 等高级参数
+                        # 也可以在这里从 cfg 传入
+                    )
                 )
+            # 4 将所有块打包成一个 nn.Sequential 模块
+            self.self_attn_layer = nn.Sequential(*rwkv_blocks)
+
+            # self.self_attn_layer = nn.Sequential(
+            #         *[Block_time(
+            #             n_embd=self.latent_dim,
+            #             n_layer=sum(self.num_layers), # 总层数，用于fancy init
+            #             layer_id=sum(self.num_layers[:i]) + layer_idx, # 当前块的全局ID
+            #             hidden_rate=4, # FFN的隐藏层倍率，可设为超参数
+            #             # drop_path, init_values 等参数也可以根据需要添加
+            #         ) for layer_idx in range(n)]
+            #     )
         elif self.arch == 'trans_dec':
             # 对于 Decoder 架构，模型包含自注意力和交叉注意力层
             self.self_attn_layers = nn.ModuleList()
@@ -459,6 +461,47 @@ class CMDM(nn.Module):
             # 从输出序列中提取出属于运动的部分
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
+
+        elif self.arch == 'trans_rwkv':
+            # 1. 拼接所有序列：[时间, 文本, 接触, 运动]
+            # (与 trans_enc 完全相同)
+            x = torch.cat([time_emb, text_emb, cont_emb, x],
+                          dim=1)  # 形状: [bs, total_len, latent_dim]
+
+            # 2. (关键区别) RWKV 不需要位置编码
+            # 您的 Block_time 及其内部的 token_shift 和 BiRWKV_TemporalMix
+            # 已经隐式地处理了时序/位置信息，因此 self.positional_encoder 是多余的。
+            # x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2) # <-- 不需要这一行
+
+            # 3. 准备掩码 (与 trans_enc 完全相同)
+            x_mask = None
+            if self.mask_motion:
+                # x_mask 形状: [bs, total_len], True/1 表示该位置是 padding
+                x_mask = torch.cat([time_mask, text_mask, cont_mask, kwargs['x_mask']], dim=1)
+
+            # 4. (关键区别) 手动应用掩码
+            # RWKV (nn.Sequential) 不接受 src_key_padding_mask
+            # 我们必须在输入 RWKV 之前，手动将所有 padding 的 token 置零
+            if x_mask is not None:
+                # x_mask 形状 [B, L], x 形状 [B, L, C]
+                # 我们需要将 x_mask 扩展到 [B, L, 1] 以便广播
+                x_mask_expanded = x_mask.unsqueeze(-1) # 形状: [bs, total_len, 1]
+                # masked_fill_ 会在 x_mask_expanded 为 True 的地方填充 0.0
+                x = x.masked_fill(x_mask_expanded, 0.0)
+
+            # 5. 通过 RWKV 堆叠层
+            # self.self_attn_layer 是一个 nn.Sequential(Block_time, ...)
+            # Block_time.forward(x) 接受 (B, L, C) 并返回 (B, L, C)
+            x = self.self_attn_layer(x)
+
+            # 6. (可选但推荐) 再次应用掩码
+            # 确保 padding 位置的输出特征也是零，不会影响后续的 motion_layer
+            if x_mask is not None:
+                x = x.masked_fill(x_mask_expanded, 0.0)
+
+            # 7. 提取运动序列 (与 trans_enc 完全相同)
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
+            x = x[:, non_motion_token:, :]    
         else:
             raise NotImplementedError
 
