@@ -38,7 +38,7 @@ try:
     point_cloud.export(save_path)
     
     print(f"\n可视化成功！")
-    print(f"已保存 "仅场景" 点云到: {save_path}")
+    print(f"已保存  点云到: {save_path}")
     print("请用 MeshLab 打开此文件，检查场景是否看起来正常。")
 
 except FileNotFoundError:
