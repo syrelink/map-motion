@@ -1,12 +1,12 @@
 import numpy as np
-import cv2
 import trimesh
 import os
 
 # --- 1. 定义文件路径 ---
 npz_file_path = 'data/HUMANISE/contact_motion/contacts/00010.npz'
 save_dir = './visualizations'
-save_path = os.path.join(save_dir, '00010_affordance_map_NORMALIZED.ply') # 改个新名字
+# 我们给它一个新名字，以便区分
+save_path = os.path.join(save_dir, '00010_SCENE_ONLY.ply') 
 
 # 确保保存目录存在
 os.makedirs(save_dir, exist_ok=True)
@@ -17,43 +17,33 @@ try:
     print(f"成功加载文件: {npz_file_path}")
     print("文件中包含的键 (Keys):", data.files)
 
-    # --- 3. 根据您的文件结构提取数据 ---
+    # --- 3. 提取 XYZ 坐标 ---
     
-    # 'points' 维度为 (8192, 6)，我们只取前 3 列作为 XYZ 坐标
+    # 'points' 维度为 (8192, 6)，我们只取前 3 列 (XYZ)
     xyz = data['points'][:, :3]
     
-    # 'dist' 维度为 (8192, 22)
-    _map = np.min(data['dist'], axis=1) # 形状 (8192,)
+    print(f"加载的 xyz 坐标维度: {xyz.shape}")
     
-    print(f"原始 Affordance 值的范围: Min={_map.min()}, Max={_map.max()}")
-    
-    # --- 4. 可视化 (关键修复) ---
-    
-    # ！！！！！！！！！！！！！！！！！！！！！！！！
-    # 关键修复：归一化 (Normalization)
-    # 将 [Min, Max] (例如 [0.03, 2.05]) 映射到 [0, 1] 范围
-    # ！！！！！！！！！！！！！！！！！！！！！！！！
-    _map_normalized = (_map - _map.min()) / (_map.max() - _map.min())
-    
-    # 现在 _map_normalized 的范围是 [0, 1]，可以安全地乘以 255
-    _map_uint8 = np.uint8(255 * _map_normalized)
-    
-    # 应用 PARULA 颜色映射
-    heatmap = cv2.applyColorMap(_map_uint8.reshape(-1, 1), cv2.COLORMAP_PARULA)
-    
-    # 转换为 RGB (Trimesh 需要)
-    heatmap_rgb = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB).reshape(-1, 3)
+    # [可选的诊断] 检查坐标范围
+    print(f"xyz 坐标 X 范围: {xyz[:, 0].min()} to {xyz[:, 0].max()}")
+    print(f"xyz 坐标 Y 范围: {xyz[:, 1].min()} to {xyz[:, 1].max()}")
+    print(f"xyz 坐标 Z 范围: {xyz[:, 2].min()} to {xyz[:, 2].max()}")
 
-    # --- 5. 创建并导出 Trimesh 点云 ---
+    # --- 4. 创建并导出 Trimesh 点云 (仅坐标) ---
     
-    point_cloud = trimesh.PointCloud(vertices=xyz, colors=heatmap_rgb)
+    # 创建点云对象，注意：这次我们 "不" 传递 colors 参数
+    point_cloud = trimesh.PointCloud(vertices=xyz)
     
     # 导出到文件
     point_cloud.export(save_path)
     
     print(f"\n可视化成功！")
-    print(f"已保存到: {save_path}")
-    print("请检查新生成的文件，这次应该有彩色热力图了。")
+    print(f"已保存 "仅场景" 点云到: {save_path}")
+    print("请用 MeshLab 打开此文件，检查场景是否看起来正常。")
 
+except FileNotFoundError:
+    print(f"错误: 找不到文件 {npz_file_path}")
+except KeyError as e:
+    print(f"错误: 文件中找不到键 {e}。")
 except Exception as e:
     print(f"发生错误: {e}")
