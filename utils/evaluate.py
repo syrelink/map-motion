@@ -490,7 +490,8 @@ def smplx_signed_distance(object_points, smplx_vertices, smplx_face):
     e2 = smplx_face_vertices[:, :, 2] - smplx_face_vertices[:, :, 0]
     e1 = e1 / torch.norm(e1, dim=-1, p=2).unsqueeze(-1)
     e2 = e2 / torch.norm(e2, dim=-1, p=2).unsqueeze(-1)
-    smplx_face_normal = torch.cross(e1, e2)     # (B, F, 3)
+    # smplx_face_normal = torch.cross(e1, e2)     # (B, F, 3)
+    smplx_face_normal = torch.cross(e1, e2,dim=-1)
 
     # compute vertex normal
     smplx_vertex_normals = torch.zeros(smplx_vertices.shape).float().cuda()

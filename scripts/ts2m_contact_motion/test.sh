@@ -14,7 +14,7 @@ python test.py hydra/job_logging=none hydra/hydra_logging=none \
             diffusion.steps=500 \
             task=contact_motion_gen \
             model=cmdm \
-            model.arch='trans_enc' \
+            model.arch='trans_rwkv' \
             model.time_emb_dim=128 \
             task.dataset.sigma=0.8 \
             task.dataset.sets=["HUMANISE"] \
