@@ -105,6 +105,8 @@ def rendering(file_path, save_path, render_joint=False):
         body_meshes = [trimesh.Trimesh(vertices=verts[i], faces=faces) for i in range(len(verts))]
 
     ## scene mesh
+    # 添加这行来打印文件名
+    print(f"--- 正在加载场景: {scene_mesh} ---")
     scene_mesh = trimesh.load(scene_mesh, process=False)
     scene_mesh.apply_transform(scene_trans)
 
