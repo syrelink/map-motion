@@ -14,11 +14,11 @@ python test.py hydra/job_logging=none hydra/hydra_logging=none \
             diffusion.steps=500 \
             task=contact_motion_gen \
             model=cmdm \
-            model.arch='trans_rwkv' \
+            model.arch='trans_enc' \
             model.time_emb_dim=128 \
             task.dataset.sigma=0.8 \
             task.dataset.sets=["HUMANISE"] \
-            task.evaluator.k_samples=0 \
+            task.evaluator.k_samples=20 \
             task.evaluator.eval_nbatch=32 \
             task.evaluator.num_k_samples=320 \
             task.test.contact_folder=${CONT}

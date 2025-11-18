@@ -2,7 +2,7 @@ import numpy as np
 
 # 你要检查的文件路径
 file_path3 = 'data/H3D/contacts/000000.npz'
-file_path = 'data/HUMANISE/contact_motion/motions/00010.npy'
+file_path = 'outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/02000.npy'
 
 print(f"--- 正在分析文件: {file_path} ---")
 
