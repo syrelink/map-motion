@@ -1,98 +1,71 @@
 import numpy as np
-import trimesh
 import cv2
+import trimesh
 import os
-import glob
+from numpy.linalg import norm # L2 模长计算
+
+# --- 关键路径 (用户需要替换为实际路径) ---
+# 预测的 Affordance 编码特征 (1, 8192, 6)
+PREDICTED_NPY_PATH = "outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/02000.npy"
+
+# 场景点 XYZ 坐标路径 (从 GT npz 文件中获取)
+# 假设场景 XYZ 坐标在 GT npz 文件中，我们将从 'points' 键中提取前 3 维
+SCENE_XYZ_PATH = "data/HUMANISE/contact_motion/contacts/00000.npz" 
+
+# 输出 PLY 文件路径
+OUTPUT_PLY_PATH = "visualization_output/adm_affordance_heatmap.ply"
+os.makedirs(os.path.dirname(OUTPUT_PLY_PATH) or '.', exist_ok=True)
 
 
-def auto_match_and_visualize(pred_dir, gt_dir, output_dir="./map-vis-matched"):
-    # 1. 准备输出目录
-    if not os.path.exists(output_dir):
-        os.makedirs(output_dir)
-        print(f"📂 创建输出目录: {output_dir}")
-
-    # 2. 获取所有预测文件 (.npy)
-    # 假设文件名格式是 "02000.npy"
-    pred_files = glob.glob(os.path.join(pred_dir, "*.npy"))
-
-    if len(pred_files) == 0:
-        print("❌ 未找到任何 .npy 文件，请检查 pred_dir 路径！")
+def generate_adm_heatmap(predicted_npy_path: str, scene_data_path: str, save_path: str):
+    """
+    将模型预测的 (1, 8192, 6) 维 Affordance 编码特征转换为彩色热力点云。
+    热力值通过 L2 模长计算，并使用 cv2.COLORMAP_PARULA 进行映射。
+    """
+    print(f"--- 正在处理预测文件: {predicted_npy_path} ---")
+    
+    # 1. 加载预测的 Affordance 编码特征 (1, 8192, 6)
+    try:
+        predicted_features_npy = np.load(predicted_npy_path)
+        feature_map = predicted_features_npy.squeeze(0) # 形状: (8192, 6)
+        
+        # 2. 加载场景 XYZ 坐标 (从 GT npz 文件中获取)
+        with np.load(scene_data_path) as data:
+            # 提取 XYZ 坐标 (8192, 3)
+            xyz = data['points'][:, :3] 
+            print(f"场景 XYZ 形状: {xyz.shape}")
+    except FileNotFoundError as e:
+        print(f"错误: 无法找到文件。请检查路径: {e}")
         return
+    
+    # --- 3. 核心转换：L2 模长计算 (Affordance Score) ---
+    # L2 模长 (norm) 将 6 维特征抽象为单维度热力值
+    affordance_scores = norm(feature_map, axis=1) # 形状: (8192,)
 
-    print(f"🔍 找到 {len(pred_files)} 个预测文件，开始自动匹配...")
+    # 4. 归一化 Affordance Score 到 [0, 1]
+    if np.max(affordance_scores) > 0:
+        normalized_affordance = affordance_scores / np.max(affordance_scores)
+    else:
+        normalized_affordance = np.zeros_like(affordance_scores)
 
-    success_count = 0
+    # --- 5. 应用作者的颜色映射逻辑 ---
+    # a) 归一化到 [0, 255] 并转换为 uint8 类型
+    # _map 现在是 0-255 的 Affordance 强度
+    _map = np.uint8(255 * normalized_affordance)
+    
+    # b) 应用颜色映射
+    heatmap = cv2.applyColorMap(_map, cv2.COLORMAP_PARULA) 
+    
+    # c) 颜色空间转换 (BGR to RGB) 和重塑 (N x 3)
+    # 注意：trimesh 通常使用 RGB，cv2 默认输出 BGR，需要转换。
+    # 作者的代码使用了 cv2.COLOR_RGB2BGR，但从功能上看，我们希望得到 RGB，所以使用 BGR2RGB 进行标准转换。
+    heatmap = cv2.cvtColor(heatmap, cv2.COLOR_BGR2RGB).reshape(-1, 3) 
+    
+    # 6. 创建并导出彩色点云 (PLY)
+    pc = trimesh.PointCloud(vertices=xyz, colors=heatmap)
+    pc.export(save_path)
+    
+    print(f"成功生成 Affordance 热力点云文件: {save_path}")
 
-    for pred_path in pred_files:
-        try:
-            # --- A. 提取核心 ID ---
-            # 从 "path/to/02000.npy" 提取 "02000"
-            file_name = os.path.basename(pred_path)  # "02000.npy"
-            file_id = os.path.splitext(file_name)[0]  # "02000"
-
-            # --- B. 构造对应的 GT 路径 ---
-            # 只要 ID 一样，它们就是一对！
-            gt_path = os.path.join(gt_dir, f"{file_id}.npz")
-
-            # 检查 GT 是否存在
-            if not os.path.exists(gt_path):
-                print(f"⚠️  跳过: 找到了预测 {file_id}.npy，但在 data 文件夹没找到对应的 {file_id}.npz")
-                continue
-
-            # --- C. 开始“移花接木” ---
-            # 1. 读取预测 (取热力值 - 后3列)
-            pred_data = np.load(pred_path)  # (1, 8192, 6)
-            pred_colors = pred_data[0, :, 3:]
-
-            # 2. 读取 GT (取几何 XYZ - 前3列)
-            gt_data = np.load(gt_path)
-            # 兼容不同的 key 写法
-            if 'points' in gt_data:
-                real_xyz = gt_data['points'][:, :3]
-            elif 'scene' in gt_data:
-                real_xyz = gt_data['scene'][:, :3]
-            else:
-                real_xyz = gt_data['arr_0'][:, :3]
-
-            # --- D. 生成热力图 ---
-            # 计算强度并归一化
-            intensity = np.mean(pred_colors, axis=1)
-            # 动态归一化以增强每张图的对比度
-            norm_intensity = (intensity - intensity.min()) / (intensity.max() - intensity.min() + 1e-8)
-            norm_uint8 = np.uint8(255 * norm_intensity)
-
-            # 颜色映射
-            try:
-                colormap = cv2.COLORMAP_PARULA
-            except AttributeError:
-                colormap = cv2.COLORMAP_JET
-
-            heatmap = cv2.applyColorMap(norm_uint8, colormap).squeeze()
-            heatmap_rgb = cv2.cvtColor(heatmap.reshape(1, -1, 3), cv2.COLOR_BGR2RGB).reshape(-1, 3)
-
-            # --- E. 保存 ---
-            save_name = f"vis_{file_id}.ply"
-            save_path = os.path.join(output_dir, save_name)
-
-            trimesh.PointCloud(vertices=real_xyz, colors=heatmap_rgb).export(save_path)
-
-            print(f"✅ 已生成: {save_name} (匹配 ID: {file_id})")
-            success_count += 1
-
-        except Exception as e:
-            print(f"❌ 处理 {file_id} 时出错: {e}")
-
-    print(f"\n🎉 处理完成！成功匹配并生成了 {success_count} 个文件。")
-    print(f"结果保存在: {output_dir}")
-
-
-# --- 🚀 运行配置 ---
-if __name__ == "__main__":
-    # 1. 预测文件文件夹 (包含 02000.npy 等)
-    pred_folder = "outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/"
-
-    # 2. 真实数据文件夹 (包含 02000.npz 等)
-    # 请务必确认这个路径下有大量 .npz 文件
-    gt_folder = "data/HUMANISE/contact_motion/contacts/"
-
-    auto_match_and_visualize(pred_folder, gt_folder)
+# 执行分析
+# generate_adm_heatmap(PREDICTED_NPY_PATH, SCENE_XYZ_PATH, OUTPUT_PLY_PATH)
