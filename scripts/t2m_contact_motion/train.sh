@@ -12,6 +12,6 @@ python train.py hydra/job_logging=none hydra/hydra_logging=none \
             task.train.save_every_step=100000 \
             task.dataset.train_transforms=['RandomEraseLang','RandomEraseContact','NumpyToTensor'] \
             model=cmdm \
-            model.arch='trans_enc' \
+            model.arch='trans_rwkv-last' \
             model.data_repr='h3d' \
             model.text_model.max_length=20

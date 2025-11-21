@@ -55,6 +55,9 @@ class CMDM(nn.Module):
         elif self.arch == 'trans_rwkv':
             SceneMapModule = SceneMapEncoder
             self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
+        elif self.arch == 'trans_rwkv-last':
+            SceneMapModule = SceneMapEncoder
+            self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
         elif self.arch == 'trans_dec':
             # Transformer Decoder 架构：场景编码器输出多层次的特征，用于交叉注意力
             SceneMapModule = SceneMapEncoderDecoder
@@ -105,7 +108,38 @@ class CMDM(nn.Module):
                     dropout=0.1,
                     drop_path_rate=0.1
                 )
+        elif self.arch == 'trans_rwkv-last':
+            # 计算总层数
+            total_layers = sum(cfg.num_layers)
+            layers_list = []
+            # 1. 添加前 N-1 层：Standard Self-Attention (TransformerEncoderLayer)
+            # 注意：如果总层数只有1层，这个循环不会执行，直接添加RWKV
+            for _ in range(total_layers - 1):
+                layers_list.append(
+                    nn.TransformerEncoderLayer(
+                        d_model=self.latent_dim,
+                        nhead=cfg.num_heads,
+                        dim_feedforward=cfg.dim_feedforward,
+                        dropout=cfg.dropout,
+                        activation='gelu',
+                        batch_first=True,  # 保持和 trans_enc 一致
+                        # norm_first=False # 根据需要决定是否开启 Pre-Norm
+                    )
+                )
 
+            # 2. 添加最后一层：RWKV (Block_time)
+            layers_list.append(
+                Block_time(
+                    n_embd=self.latent_dim,
+                    n_layer=total_layers,  # 总层数信息传给 RWKV 用于初始化缩放
+                    layer_id=total_layers - 1,  # 这是最后一层，ID 为 N-1
+                    hidden_rate=cfg.dim_feedforward // self.latent_dim,
+                    drop_path=cfg.dropout,
+                )
+            )
+
+            # 3. 将所有块打包成一个 nn.Sequential 模块
+            self.self_attn_layer = nn.Sequential(*layers_list)
         elif self.arch == 'trans_enc':
             # 对于 Encoder 架构，使用一个标准的 nn.TransformerEncoder
             # 所有输入（时间、文本、接触、运动）被拼接成一个长序列进行处理
@@ -118,6 +152,7 @@ class CMDM(nn.Module):
                     activation='gelu',
                     batch_first=True,  # 输入/输出张量的形状为 [batch, seq, feature]
                 ),
+
                 enable_nested_tensor=False,  # 推荐设置为 False 以支持 padding mask
                 num_layers=sum(cfg.num_layers),
             )
@@ -127,12 +162,11 @@ class CMDM(nn.Module):
                 rwkv_blocks.append(
                     Block_time(
                         n_embd=self.latent_dim,
-                        n_layer=sum(cfg.num_layers),  # RWKV 'fancy init' 需要总层数
-                        layer_id=i,           # 当前层的 ID (从 0 到 total_depth-1)
+                        n_layer=sum(cfg.num_layers),
+                        layer_id=i,
                         hidden_rate=cfg.dim_feedforward // self.latent_dim,
-                        drop_path=cfg.dropout, # 复用 cfg 中的 dropout 作为 drop_path
-                        # init_values, post_norm, key_norm 等高级参数
-                        # 也可以在这里从 cfg 传入
+                        drop_path=cfg.dropout,
+
                     )
 
                 )
@@ -384,6 +418,33 @@ class CMDM(nn.Module):
             non_motion_token = time_mask.shape[1] + text_mask.shape[1]
             x = x[:, non_motion_token:, :]
 
+        elif self.arch == 'trans_rwkv-last':
+            # 1. 数据拼接 (与 trans_enc 保持一致)
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
+
+            # 2. 位置编码 (与 trans_enc 保持一致)
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            # 3. 准备 Mask (与 trans_enc 保持一致)
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, cont_mask, kwargs['x_mask']], dim=1)
+
+            # 4. 逐层前向传播 [重点修改部分]
+            # 不能直接 self.self_attn_layer(x, src_key_padding_mask=x_mask)
+            # 因为 RWKV 层可能不接受 mask，且 nn.Sequential 不支持多参数传递
+            for layer in self.self_attn_layer:
+                if isinstance(layer, nn.TransformerEncoderLayer):
+                    # 如果是 Transformer 层，传入 mask
+                    x = layer(x, src_key_padding_mask=x_mask)
+                else:
+                    # 如果是 RWKV (Block_time) 层，通常只需要传入 x
+                    # 注意：如果你的 Block_time forward 需要其他参数，需在这里调整
+                    x = layer(x)
+
+            # 5. 提取输出 (与 trans_enc 保持一致)
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
+            x = x[:, non_motion_token:, :]
         # 该分支 'trans_mambaTrans' 的逻辑与 'trans_dec' 相同，可能是为未来扩展保留的
         elif self.arch == 'trans_mambaTrans':
             """

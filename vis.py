@@ -1,8 +1,26 @@
 import numpy as np
+'''
+outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/02000.npy: (1, 8192, 6)
+正在检查文件: data/HUMANISE/contact_motion/contacts/00000.npz 
+包含的键 (Keys): ['points', 'mask', 'dist']
 
+数组名: 'points'
+  -> 维度 (Shape): (8192, 6)
+  -> 数据类型: float32
+------------------------------
+数组名: 'mask'
+  -> 维度 (Shape): (8192,)
+  -> 数据类型: int64
+------------------------------
+数组名: 'dist'
+  -> 维度 (Shape): (8192, 22)
+  -> 数据类型: float32
+------------------------------
+
+'''
 # 你要检查的文件路径
 file_path3 = 'data/H3D/contacts/000000.npz'
-file_path = 'outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/02000.npy'
+file_path = 'data/HUMANISE/contact_motion/contacts/00000.npz'
 
 print(f"--- 正在分析文件: {file_path} ---")
 

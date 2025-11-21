@@ -1,89 +1,81 @@
 import numpy as np
-import cv2
 import trimesh
+import cv2
 import os
 
-# --- 1. 定义文件路径 ---
 
-# !! 重要 !!
-# 我们已经确认 00010.npz 是异常数据。
-# 请在这里换上您 "contacts" 文件夹中的 "另一个" 文件，例如 00001.npz
-npz_file_path = 'outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1114-125307/HUMANISE/pred_contact/02000.npy'
+def visualize_affordance(npz_path, output_filename="affordance_vis.ply"):
+    print(f"正在处理文件: {npz_path}")
 
-# --------------------------------------------------------------------
+    # 1. 加载数据
+    data = np.load(npz_path)
 
-# 自动创建输出文件名
-file_basename = os.path.splitext(os.path.basename(npz_file_path))[0]
-save_dir = './visualizations'
-save_path = os.path.join(save_dir, f'{file_basename}_heatmap.ply')
+    # 获取场景点坐标 (XYZ)
+    # shape: (8192, 6) -> 取前3列作为坐标
+    points_raw = data['points']
+    xyz = points_raw[:, :3]
 
-# 确保保存目录存在
-os.makedirs(save_dir, exist_ok=True)
+    # 获取距离场数据
+    # shape: (8192, 22)
+    dists = data['dist']
 
-# --- 2. 加载与处理数据 ---
-try:
-    data = np.load(npz_file_path)
-    print(f"成功加载文件: {npz_file_path}")
-    print("文件中包含的键 (Keys):", data.files)
+    # 2. 计算 Affordance (可供性)
+    # 论文公式 (1): c = exp(-0.5 * d / sigma^2)
+    # 原始数据是距离(distance)，我们需要将其转换为热度(affinity)。
+    # 场景中某一点的 affordance 取决于它离人体"最近"的那个关节的距离。
 
-    # --- 3. 提取 XYZ 坐标 ---
-    # 'points' 维度为 (N, 6)，我们只取前 3 列作为 XYZ 坐标
-    if 'points' not in data:
-        raise KeyError("文件中未找到 'points' 键。")
-    
-    xyz = data['points'][:, :3]
-    
-    # [诊断] 检查坐标范围，这次它不应该是一条直线
-    print(f"坐标 X 范围: {xyz[:, 0].min():.4f} to {xyz[:, 0].max():.4f}")
-    print(f"坐标 Y 范围: {xyz[:, 1].min():.4f} to {xyz[:, 1].max():.4f}")
-    print(f"坐标 Z 范围: {xyz[:, 2].min():.4f} to {xyz[:, 2].max():.4f}")
+    # 第一步：对22个关节取最小距离，得到该点离人体的最近距离
+    # Shape 变为 (8192,)
+    min_dist = np.min(dists, axis=1)
 
-    # --- 4. 提取、聚合、归一化 Affordance 数据 ---
-    if 'dist' not in data:
-        raise KeyError("文件中未找到 'dist' 键。")
-        
-    # 'dist' 维度为 (N, 22)
-    dist_map = data['dist']
-    
-    # 步骤 A: 聚合 (Aggregation)
-    # 沿 22 个关节的维度(axis=1)取最小值，得到 (N,) 形状的数组
-    _map = np.min(dist_map, axis=1) 
-    
-    print(f"原始 Affordance 值的范围: Min={_map.min():.4f}, Max={_map.max():.4f}")
+    # 第二步：应用高斯核进行转换 (Distance -> Affordance)
+    # sigma 控制热力图的扩散程度，论文中提到 sigma 是归一化因子
+    sigma = 0.5  # 可以根据视觉效果调整这个参数
+    affordance_val = np.exp(-0.5 * (min_dist ** 2) / (sigma ** 2))
 
-    # 步骤 B: 归一化 (Normalization) - [关键修复]
-    # 将 [Min, Max] 映射到 [0, 1] 范围
-    _map_normalized = (_map - _map.min()) / (_map.max() - _map.min())
-    print(f"归一化的范围: Min={_map_normalized.min():.4f}, Max={_map_normalized.max():.4f}")
-    # 步骤 C: 转换为 [0, 255] 的 uint8
-    _map_uint8 = np.uint8(255 * _map_normalized)
+    # 3. 归一化到 [0, 255]
+    # 将 0.0-1.0 的浮点数映射到 0-255 的整数
+    # 为了增强对比度，这里使用了基于数据最大最小值的归一化
+    _map = (affordance_val - affordance_val.min()) / (affordance_val.max() - affordance_val.min() + 1e-8)
+    _map = np.uint8(255 * _map)
 
-    # --- 5. 颜色映射 (Color Mapping) ---
-    
-    # 应用 PARULA 颜色映射
-    # _map_uint8 必须是 (N, 1) 的形状
-    heatmap_bgr = cv2.applyColorMap(_map_uint8.reshape(-1, 1), cv2.COLORMAP_PARULA)
-    
-    # 将 BGR 转换为 RGB (Trimesh 需要 RGB)，并重塑为 (N, 3)
-    heatmap_rgb = cv2.cvtColor(heatmap_bgr, cv2.COLOR_BGR2RGB).reshape(-1, 3)
+    # 4. 应用颜色映射 (Color Mapping)
+    # 注意: cv2.COLORMAP_PARULA 在标准 OpenCV 中可能不可用。
+    # 如果报错，通常使用 cv2.COLORMAP_JET 或 cv2.COLORMAP_VIRIDIS 代替。
+    try:
+        # 尝试使用 Parula (如果你的 opencv 支持)
+        colormap_mode = cv2.COLORMAP_PARULA
+    except AttributeError:
+        print("警告: 当前 OpenCV 版本不支持 COLORMAP_PARULA，切换为 COLORMAP_JET")
+        colormap_mode = cv2.COLORMAP_JET
 
-    # --- 6. 创建并导出 Trimesh 点云 ---
-    
-    # 使用 xyz 坐标和 heatmap_rgb 颜色创建点云对象
-    point_cloud = trimesh.PointCloud(vertices=xyz, colors=heatmap_rgb)
-    
-    # 导出到文件
-    point_cloud.export(save_path)
-    
-    print(f"\n可视化成功！")
+    # applyColorMap 需要输入维度为 (N, 1) 或 (H, W)
+    heatmap = cv2.applyColorMap(_map, colormap_mode)
 
-    print(f"已保存热力图点云到: {save_path}")
-    print("请用 MeshLab 打开此文件查看。")
+    # applyColorMap 输出是 BGR 格式 (8192, 1, 3)，我们需要 (8192, 3) RGB
+    heatmap = heatmap.squeeze()
+    heatmap_rgb = cv2.cvtColor(heatmap.reshape(1, -1, 3), cv2.COLOR_BGR2RGB).reshape(-1, 3)
+
+    # 5. 导出点云
+    # 创建 Trimesh 点云对象：包含几何位置(vertices)和颜色(colors)
+    pcd = trimesh.PointCloud(vertices=xyz, colors=heatmap_rgb)
+
+    # 保存文件
+    pcd.export(output_filename)
+    print(f"可视化文件已保存至: {output_filename}")
 
 
-except FileNotFoundError:
-    print(f"错误: 找不到文件 {npz_file_path}")
-except KeyError as e:
-    print(f"错误: {e}")
-except Exception as e:
-    print(f"发生未知错误: {e}")
+# --- 运行示例 ---
+# 请修改为你的实际文件路径
+input_file = "data/HUMANISE/contact_motion/contacts/00002.npz"
+
+if os.path.exists(input_file):
+    visualize_affordance(input_file)
+else:
+    print(f"找不到文件: {input_file}，请检查路径。")
+
+# # 如果你想可视化那个预测文件 (pred_contact/02000.npy):
+# data = np.load("outputs/CDM-Perceiver-HUMANISE-step200k/eval/test-1118-194403/HUMANISE/pred_contact/02000.npy")
+# xyz = data[0, :, :3]  # 取第一个 batch
+# colors = data[0, :, 3:] # 假设后3维是预测的颜色
+# trimesh.PointCloud(vertices=xyz, colors=colors).export("pred_vis.ply")
