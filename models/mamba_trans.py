@@ -117,20 +117,29 @@ class ResidualHybridBlock(nn.Module):
 class MambaTransBackbone(nn.Module):
     def __init__(self, num_layers, latent_dim, num_heads, ff_size, dropout=0.1, drop_path_rate=0.1):
         super().__init__()
-        num_mamba_layers = 1 
-        # num_mamba_layers = int(num_layers * 0.75)
+        
+        # 生成 Drop path rate 列表
         dpr = [x.item() for x in torch.linspace(0, drop_path_rate, num_layers)]
         self.blocks = nn.ModuleList()
+        
         for i in range(num_layers):
-            is_transformer = i >= num_mamba_layers
-            print('trans:',is_transformer)
+            # --- 修改核心逻辑 ---
+            # 如果 i 是最后一个索引 (num_layers - 1)，则是 Mamba
+            # 否则 (前 num_layers - 1 层) 都是 Transformer
+            if i == num_layers - 1:
+                is_transformer = False 
+            else:
+                is_transformer = True
+            
+            # 打印日志方便确认结构
+            print(f'Layer {i} type: {"Transformer" if is_transformer else "Mamba"}')
+            
             self.blocks.append(
-                # 注意：由于动作数据是一维的，window_size 参数在此简化版中不再需要
                 ResidualHybridBlock(
                     dim=latent_dim,
                     num_heads=num_heads,
-                    window_size=0,  # 设为0或移除
-                    is_transformer_layer=is_transformer,
+                    window_size=0, 
+                    is_transformer_layer=is_transformer, # 传入判断结果
                     mlp_ratio=ff_size / latent_dim if latent_dim > 0 else 4.0,
                     drop=dropout,
                     attn_drop=dropout,
@@ -138,12 +147,15 @@ class MambaTransBackbone(nn.Module):
                 )
             )
 
-    def forward(self, x, src_key_padding_mask=None):
-        x = x.permute(1, 0, 2)
+def forward(self, x, src_key_padding_mask=None):
+        # --- 修正点 ---
+        # 假设输入 x 的形状已经是 [Batch, Length, Dim]
+        # 严禁在此处使用 x.permute(1, 0, 2)，因为内部模块 (Mamba/SelfAttn) 都假设第一维是 Batch
+        
         for blk in self.blocks:
-            # 简化后的全局注意力暂不处理 mask
             x = blk(x)
-        x = x.permute(1, 0, 2)
+        
+        # 输出保持 [Batch, Length, Dim]
         return x
 
 
