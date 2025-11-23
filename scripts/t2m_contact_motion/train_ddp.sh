@@ -16,9 +16,9 @@ CUDA_VISIBLE_DEVICES=0,1 torchrun --nnodes=1 --nproc_per_node=2 --rdzv_backend=c
             task.dataset.sigma=0.8 \
             task.train.batch_size=64 \
             task.train.max_steps=600000 \
-            task.train.save_every_step=100000 \
+            task.train.save_every_step=50000 \
             task.dataset.train_transforms=['RandomEraseLang','RandomEraseContact','NumpyToTensor'] \
             model=cmdm \
-            model.arch='trans_rwkv-last' \
+            model.arch='trans_enc' \
             model.data_repr='h3d' \
             model.text_model.max_length=20
