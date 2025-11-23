@@ -147,15 +147,23 @@ class MambaTransBackbone(nn.Module):
                 )
             )
 
-def forward(self, x, src_key_padding_mask=None):
-        # --- 修正点 ---
-        # 假设输入 x 的形状已经是 [Batch, Length, Dim]
-        # 严禁在此处使用 x.permute(1, 0, 2)，因为内部模块 (Mamba/SelfAttn) 都假设第一维是 Batch
-        
+    def forward(self, x, src_key_padding_mask=None):
+        # x input from cmdm.py is: [Length, Batch, Dim] (L, B, C)
+        # src_key_padding_mask is: [Batch, Length] (B, L)
+
+        # 1. 维度转换: (L, B, C) -> (B, L, C)
+        # 因为 Mamba 和 我们的 SelfAttention 代码都期望 Batch First
+        x = x.permute(1, 0, 2)
+
+        # 2. 逐层处理
         for blk in self.blocks:
+
             x = blk(x)
-        
-        # 输出保持 [Batch, Length, Dim]
+
+        # 3. 维度还原: (B, L, C) -> (L, B, C)
+        # 为了配合 cmdm.py 后续的处理
+        x = x.permute(1, 0, 2)
+
         return x
 
 
