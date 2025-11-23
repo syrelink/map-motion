@@ -11,6 +11,7 @@ train:
   save_every_step: 10000 # save model every ${save_every_step} steps
   phase: 'train' # train or all
 
+
   resume_ckpt: '' # resume from checkpoint
   weight_decay: 0.0
   lr_anneal_steps: 0
