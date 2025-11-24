@@ -1,0 +1,325 @@
+2025-09-15 15:05:56.007 | INFO     | __main__:main:43 - [Configuration]
+project: scenediffuser++
+project_desc: scenediffuser plus plus
+output_dir: outputs
+exp_name: RTX4090
+exp_dir: ${output_dir}/${now:%Y-%m-%d_%H-%M-%S}_${exp_name}
+log_dir: ${exp_dir}/log
+ckpt_dir: ${exp_dir}/ckpt
+eval_dir: ${exp_dir}/eval
+platform: TensorBoard
+gpu: 0
+diffusion:
+  predict_xstart: true
+  steps: 1000
+  noise_schedule: cosine
+  timestep_respacing: ''
+  rescale_timesteps: false
+  loss_type: MSE
+  learn_sigma: false
+  sigma_small: true
+stats:
+  mode:
+  - word_stats
+seed: 2023
+task:
+  name: motion generation conditioned on contact map and language description
+  train:
+    lr: 0.0001
+    batch_size: 64
+    num_workers: 4
+    max_steps: 600000
+    log_every_step: 100
+    save_every_step: 100000
+    phase: train
+    resume_ckpt: ''
+    weight_decay: 0.0
+    lr_anneal_steps: 0
+    schedule_sampler_type: uniform
+  test:
+    batch_size: 32
+    num_workers: 0
+    contact_folder: ''
+  sample:
+    batch_size: 8
+    num_workers: 0
+    dataset_name: ContactMotionHumanML3DExampleDataset
+    data_path: ./data/examples/h3d_examples.txt
+    contact_folder: ''
+  dataset:
+    name: ContactMotionHumanML3DDataset
+    data_dir: ./data
+    shuffle_seed: ${seed}
+    data_repr: ${model.data_repr}
+    contact_type: ${model.contact_model.contact_type}
+    contact_joints: ${model.contact_model.contact_joints}
+    use_raw_dist: false
+    sigma: 0.8
+    num_points: 8192
+    min_horizon: 40
+    max_horizon: 196
+    mix_train_ratio: 0.5
+    train_transforms:
+    - RandomEraseLang
+    - RandomEraseContact
+    - NumpyToTensor
+    test_transforms:
+    - NumpyToTensor
+    transform_cfg:
+      gravity_dim: 1
+      random_mask_prob: 0.1
+      random_mask_prob_pc: 0.1
+  visualizer:
+    name: ContactMotionVisualizer
+    njoints: 22
+  evaluator:
+    name: Text2MotionInSceneHumanML3DEvaluator
+    njoints: 22
+    k_samples: 0
+    num_k_samples: 128
+    eval_nbatch: 32
+    eval_metrics: []
+    save_results: true
+model:
+  name: CMDM
+  input_feats: 263
+  data_repr: h3d
+  time_emb_dim: 512
+  contact_model:
+    contact_type: contact_cont_joints
+    contact_joints:
+    - 0
+    - 10
+    - 11
+    - 12
+    - 20
+    - 21
+    planes:
+    - 32
+    - 64
+    - 128
+    - 256
+    num_points: ${task.dataset.num_points}
+    blocks:
+    - 2
+    - 2
+    - 2
+    - 2
+  text_model:
+    version: ViT-B/32
+    max_length: 20
+  arch: trans_enc
+  latent_dim: 512
+  mask_motion: true
+  num_layers:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  num_heads: 8
+  dropout: 0.1
+  dim_feedforward: 1024
+
+
+2025-09-15 15:05:56.007 | INFO     | __main__:main:44 - [Train] ==> Beign training..
+2025-09-15 15:05:56.014 | INFO     | datasets.humanml3d:_load_datasets:613 - Load 23384 cases in H3D
+2025-09-15 15:06:04.471 | INFO     | __main__:main:49 - Load train dataset size: 24546
+2025-09-15 15:06:09.422 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.0.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.423 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.0.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.2.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.contact_adapter.weight torch.Size([512, 256]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.contact_adapter.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.linear.weight torch.Size([32, 9]) for optimization.
+2025-09-15 15:06:09.424 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.bn.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.bn.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.linear1.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn1.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn1.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_q.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_q.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_k.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_k.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_v.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_v.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.425 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.3.weight torch.Size([32, 3]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.3.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.0.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.0.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.2.weight torch.Size([4, 32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.2.bias torch.Size([4]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.3.weight torch.Size([4]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.3.bias torch.Size([4]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.5.weight torch.Size([4, 4]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.5.bias torch.Size([4]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn2.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn2.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.linear3.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn3.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn3.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.linear.weight torch.Size([64, 35]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.bn.weight torch.Size([64]) for optimization.
+2025-09-15 15:06:09.426 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.bn.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.linear1.weight torch.Size([64, 64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn1.weight torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn1.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_q.weight torch.Size([64, 64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_q.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_k.weight torch.Size([64, 64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_k.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_v.weight torch.Size([64, 64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_v.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.3.weight torch.Size([64, 3]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.3.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.427 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.0.weight torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.0.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.2.weight torch.Size([8, 64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.2.bias torch.Size([8]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.3.weight torch.Size([8]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.3.bias torch.Size([8]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.5.weight torch.Size([8, 8]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.5.bias torch.Size([8]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn2.weight torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn2.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.linear3.weight torch.Size([64, 64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn3.weight torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn3.bias torch.Size([64]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.linear.weight torch.Size([128, 67]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.bn.weight torch.Size([128]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.bn.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.linear1.weight torch.Size([128, 128]) for optimization.
+2025-09-15 15:06:09.428 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn1.weight torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn1.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_q.weight torch.Size([128, 128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_q.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_k.weight torch.Size([128, 128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_k.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_v.weight torch.Size([128, 128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_v.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.3.weight torch.Size([128, 3]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.3.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.0.weight torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.0.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.2.weight torch.Size([16, 128]) for optimization.
+2025-09-15 15:06:09.429 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.2.bias torch.Size([16]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.3.weight torch.Size([16]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.3.bias torch.Size([16]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.5.weight torch.Size([16, 16]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.5.bias torch.Size([16]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn2.weight torch.Size([128]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn2.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.linear3.weight torch.Size([128, 128]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn3.weight torch.Size([128]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn3.bias torch.Size([128]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.linear.weight torch.Size([256, 131]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.bn.weight torch.Size([256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.bn.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.linear1.weight torch.Size([256, 256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn1.weight torch.Size([256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn1.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_q.weight torch.Size([256, 256]) for optimization.
+2025-09-15 15:06:09.430 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_q.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_k.weight torch.Size([256, 256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_k.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_v.weight torch.Size([256, 256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_v.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.3.weight torch.Size([256, 3]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.3.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.0.weight torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.0.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.2.weight torch.Size([32, 256]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.2.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.3.weight torch.Size([32]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.3.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.431 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.5.weight torch.Size([32, 32]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.5.bias torch.Size([32]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn2.weight torch.Size([256]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn2.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.linear3.weight torch.Size([256, 256]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn3.weight torch.Size([256]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn3.bias torch.Size([256]) for optimization.
+2025-09-15 15:06:09.432 | INFO     | utils.training:__init__:43 - Add module.language_adapter.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.language_adapter.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.motion_adapter.weight torch.Size([512, 263]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.motion_adapter.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear1.bias torch.Size([1024]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm1.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm1.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm2.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-09-15 15:06:09.433 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear1.bias torch.Size([1024]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm1.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm1.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm2.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear1.bias torch.Size([1024]) for optimization.
+2025-09-15 15:06:09.434 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm1.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm1.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm2.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear1.bias torch.Size([1024]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm1.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm1.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm2.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.435 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear1.bias torch.Size([1024]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm1.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm1.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm2.weight torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm2.bias torch.Size([512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.motion_layer.weight torch.Size([263, 512]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:43 - Add module.motion_layer.bias torch.Size([263]) for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:45 - 196 parameters for optimization.
+2025-09-15 15:06:09.436 | INFO     | utils.training:__init__:46 - Total model size is 12.20 M.

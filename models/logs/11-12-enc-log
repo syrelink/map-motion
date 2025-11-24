@@ -1,0 +1,910 @@
+2025-11-22 22:27:21.854 | INFO     | __main__:main:59 - [Configuration]
+project: scenediffuser++
+project_desc: scenediffuser plus plus
+output_dir: outputs
+exp_name: CMDM-Enc-H3D-mixtrain0.5-3000e
+exp_dir: ${output_dir}/${now:%Y-%m-%d_%H-%M-%S}_${exp_name}
+log_dir: ${exp_dir}/log
+ckpt_dir: ${exp_dir}/ckpt
+eval_dir: ${exp_dir}/eval
+platform: TensorBoard
+gpu: 0
+diffusion:
+  predict_xstart: true
+  steps: 1000
+  noise_schedule: cosine
+  timestep_respacing: ''
+  rescale_timesteps: false
+  loss_type: MSE
+  learn_sigma: false
+  sigma_small: true
+stats:
+  mode:
+  - word_stats
+seed: 2023
+task:
+  name: motion generation conditioned on contact map and language description
+  train:
+    lr: 0.0001
+    batch_size: 64
+    num_workers: 4
+    max_steps: 600000
+    log_every_step: 100
+    save_every_step: 50000
+    phase: train
+    resume_ckpt: outputs/2025-11-17_16-05-37_outputs/2025-11-03_21-10-09_CMDM-Enc-H3D-mixtrain0.5-enc/ckpt/model300000.pt
+    weight_decay: 0.0
+    lr_anneal_steps: 0
+    schedule_sampler_type: uniform
+  test:
+    batch_size: 32
+    num_workers: 0
+    contact_folder: ''
+  sample:
+    batch_size: 8
+    num_workers: 0
+    dataset_name: ContactMotionHumanML3DExampleDataset
+    data_path: ./data/examples/h3d_examples.txt
+    contact_folder: ''
+  dataset:
+    name: ContactMotionHumanML3DDataset
+    data_dir: ./data
+    shuffle_seed: ${seed}
+    data_repr: ${model.data_repr}
+    contact_type: ${model.contact_model.contact_type}
+    contact_joints: ${model.contact_model.contact_joints}
+    use_raw_dist: false
+    sigma: 0.8
+    num_points: 8192
+    min_horizon: 40
+    max_horizon: 196
+    mix_train_ratio: 0.5
+    train_transforms:
+    - RandomEraseLang
+    - RandomEraseContact
+    - NumpyToTensor
+    test_transforms:
+    - NumpyToTensor
+    transform_cfg:
+      gravity_dim: 1
+      random_mask_prob: 0.1
+      random_mask_prob_pc: 0.1
+  visualizer:
+    name: ContactMotionVisualizer
+    njoints: 22
+  evaluator:
+    name: Text2MotionInSceneHumanML3DEvaluator
+    njoints: 22
+    k_samples: 0
+    num_k_samples: 128
+    eval_nbatch: 32
+    eval_metrics: []
+    save_results: true
+model:
+  name: CMDM
+  input_feats: 263
+  data_repr: h3d
+  time_emb_dim: 512
+  contact_model:
+    contact_type: contact_cont_joints
+    contact_joints:
+    - 0
+    - 10
+    - 11
+    - 12
+    - 20
+    - 21
+    planes:
+    - 32
+    - 64
+    - 128
+    - 256
+    num_points: ${task.dataset.num_points}
+    blocks:
+    - 2
+    - 2
+    - 2
+    - 2
+  text_model:
+    version: ViT-B/32
+    max_length: 20
+  arch: trans_enc
+  latent_dim: 512
+  mask_motion: true
+  num_layers:
+  - 1
+  - 1
+  - 1
+  - 1
+  - 1
+  num_heads: 8
+  dropout: 0.1
+  dim_feedforward: 1024
+
+
+2025-11-22 22:27:21.854 | INFO     | __main__:main:60 - [Train] ==> Beign training..
+2025-11-22 22:27:21.862 | INFO     | datasets.humanml3d:_load_datasets:613 - Load 23384 cases in H3D
+2025-11-22 22:27:30.182 | INFO     | __main__:main:66 - Load train dataset size: 24546
+2025-11-22 22:27:34.958 | INFO     | utils.training:load_ckpt:360 - Load parameter module.timestep_embedder.pe for current model.
+2025-11-22 22:27:34.958 | INFO     | utils.training:load_ckpt:360 - Load parameter module.timestep_embedder.time_embed.0.weight for current model.
+2025-11-22 22:27:34.958 | INFO     | utils.training:load_ckpt:360 - Load parameter module.timestep_embedder.time_embed.0.bias for current model.
+2025-11-22 22:27:34.958 | INFO     | utils.training:load_ckpt:360 - Load parameter module.timestep_embedder.time_embed.2.weight for current model.
+2025-11-22 22:27:34.958 | INFO     | utils.training:load_ckpt:360 - Load parameter module.timestep_embedder.time_embed.2.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_adapter.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_adapter.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.linear.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.bn.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.bn.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.bn.running_mean for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.bn.running_var for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.0.bn.num_batches_tracked for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.linear1.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn1.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn1.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn1.running_mean for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn1.running_var for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn1.num_batches_tracked for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_q.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_q.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_k.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_k.bias for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_v.weight for current model.
+2025-11-22 22:27:34.959 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_v.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.0.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.0.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.1.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.1.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.1.running_mean for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.1.running_var for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.1.num_batches_tracked for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.3.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_p.3.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.0.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.0.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.0.running_mean for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.0.running_var for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.0.num_batches_tracked for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.2.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.2.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.3.weight for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.3.bias for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.3.running_mean for current model.
+2025-11-22 22:27:34.960 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.3.running_var for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.3.num_batches_tracked for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.5.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.transformer2.linear_w.5.bias for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn2.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn2.bias for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn2.running_mean for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn2.running_var for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn2.num_batches_tracked for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.linear3.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn3.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn3.bias for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn3.running_mean for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn3.running_var for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc1.1.bn3.num_batches_tracked for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.linear.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.bn.weight for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.bn.bias for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.bn.running_mean for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.bn.running_var for current model.
+2025-11-22 22:27:34.961 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.0.bn.num_batches_tracked for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.linear1.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn1.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn1.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn1.running_mean for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn1.running_var for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn1.num_batches_tracked for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_q.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_q.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_k.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_k.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_v.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_v.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.0.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.0.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.1.weight for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.1.bias for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.1.running_mean for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.1.running_var for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.1.num_batches_tracked for current model.
+2025-11-22 22:27:34.962 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.3.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_p.3.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.0.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.0.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.0.running_mean for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.0.running_var for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.0.num_batches_tracked for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.2.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.2.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.3.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.3.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.3.running_mean for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.3.running_var for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.3.num_batches_tracked for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.5.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.transformer2.linear_w.5.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn2.weight for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn2.bias for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn2.running_mean for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn2.running_var for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn2.num_batches_tracked for current model.
+2025-11-22 22:27:34.963 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.linear3.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn3.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn3.bias for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn3.running_mean for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn3.running_var for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc2.1.bn3.num_batches_tracked for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.linear.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.bn.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.bn.bias for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.bn.running_mean for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.bn.running_var for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.0.bn.num_batches_tracked for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.linear1.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn1.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn1.bias for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn1.running_mean for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn1.running_var for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn1.num_batches_tracked for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_q.weight for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_q.bias for current model.
+2025-11-22 22:27:34.964 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_k.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_k.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_v.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_v.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.0.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.0.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.1.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.1.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.1.running_mean for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.1.running_var for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.1.num_batches_tracked for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.3.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_p.3.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.0.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.0.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.0.running_mean for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.0.running_var for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.0.num_batches_tracked for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.2.weight for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.2.bias for current model.
+2025-11-22 22:27:34.965 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.3.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.3.bias for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.3.running_mean for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.3.running_var for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.3.num_batches_tracked for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.5.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.transformer2.linear_w.5.bias for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn2.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn2.bias for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn2.running_mean for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn2.running_var for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn2.num_batches_tracked for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.linear3.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn3.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn3.bias for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn3.running_mean for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn3.running_var for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc3.1.bn3.num_batches_tracked for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.linear.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.bn.weight for current model.
+2025-11-22 22:27:34.966 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.bn.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.bn.running_mean for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.bn.running_var for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.0.bn.num_batches_tracked for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.linear1.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn1.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn1.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn1.running_mean for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn1.running_var for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn1.num_batches_tracked for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_q.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_q.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_k.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_k.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_v.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_v.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.0.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.0.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.1.weight for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.1.bias for current model.
+2025-11-22 22:27:34.967 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.1.running_mean for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.1.running_var for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.1.num_batches_tracked for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.3.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_p.3.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.0.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.0.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.0.running_mean for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.0.running_var for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.0.num_batches_tracked for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.2.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.2.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.3.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.3.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.3.running_mean for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.3.running_var for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.3.num_batches_tracked for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.5.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.transformer2.linear_w.5.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn2.weight for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn2.bias for current model.
+2025-11-22 22:27:34.968 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn2.running_mean for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn2.running_var for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn2.num_batches_tracked for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.linear3.weight for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn3.weight for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn3.bias for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn3.running_mean for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn3.running_var for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.contact_encoder.enc4.1.bn3.num_batches_tracked for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.language_adapter.weight for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.language_adapter.bias for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.motion_adapter.weight for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.motion_adapter.bias for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.positional_encoder.pe for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.self_attn.in_proj_weight for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.self_attn.in_proj_bias for current model.
+2025-11-22 22:27:34.969 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.self_attn.out_proj.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.self_attn.out_proj.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.linear1.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.linear1.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.linear2.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.linear2.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.norm1.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.norm1.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.norm2.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.0.norm2.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.self_attn.in_proj_weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.self_attn.in_proj_bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.self_attn.out_proj.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.self_attn.out_proj.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.linear1.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.linear1.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.linear2.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.linear2.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.norm1.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.norm1.bias for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.norm2.weight for current model.
+2025-11-22 22:27:34.970 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.1.norm2.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.self_attn.in_proj_weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.self_attn.in_proj_bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.self_attn.out_proj.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.self_attn.out_proj.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.linear1.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.linear1.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.linear2.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.linear2.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.norm1.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.norm1.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.norm2.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.2.norm2.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.self_attn.in_proj_weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.self_attn.in_proj_bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.self_attn.out_proj.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.self_attn.out_proj.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.linear1.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.linear1.bias for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.linear2.weight for current model.
+2025-11-22 22:27:34.971 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.linear2.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.norm1.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.norm1.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.norm2.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.3.norm2.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.self_attn.in_proj_weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.self_attn.in_proj_bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.self_attn.out_proj.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.self_attn.out_proj.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.linear1.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.linear1.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.linear2.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.linear2.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.norm1.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.norm1.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.norm2.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.self_attn_layer.layers.4.norm2.bias for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.motion_layer.weight for current model.
+2025-11-22 22:27:34.972 | INFO     | utils.training:load_ckpt:360 - Load parameter module.motion_layer.bias for current model.
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.positional_embedding
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.text_projection
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.logit_scale
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.class_embedding
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.positional_embedding
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.proj
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.conv1.weight
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.ln_pre.weight
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.ln_pre.bias
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.attn.in_proj_weight
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.attn.in_proj_bias
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.attn.out_proj.weight
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.attn.out_proj.bias
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.ln_1.weight
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.ln_1.bias
+2025-11-22 22:27:34.973 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.mlp.c_fc.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.mlp.c_fc.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.mlp.c_proj.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.mlp.c_proj.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.ln_2.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.0.ln_2.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.attn.in_proj_weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.attn.in_proj_bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.attn.out_proj.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.attn.out_proj.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.ln_1.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.ln_1.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.mlp.c_fc.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.mlp.c_fc.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.mlp.c_proj.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.mlp.c_proj.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.ln_2.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.1.ln_2.bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.attn.in_proj_weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.attn.in_proj_bias
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.attn.out_proj.weight
+2025-11-22 22:27:34.974 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.attn.out_proj.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.ln_1.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.ln_1.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.mlp.c_fc.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.mlp.c_fc.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.mlp.c_proj.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.mlp.c_proj.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.ln_2.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.2.ln_2.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.attn.in_proj_weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.attn.in_proj_bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.attn.out_proj.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.attn.out_proj.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.ln_1.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.ln_1.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.mlp.c_fc.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.mlp.c_fc.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.mlp.c_proj.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.mlp.c_proj.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.ln_2.weight
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.3.ln_2.bias
+2025-11-22 22:27:34.975 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.attn.in_proj_weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.attn.in_proj_bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.attn.out_proj.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.attn.out_proj.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.ln_1.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.ln_1.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.mlp.c_fc.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.mlp.c_fc.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.mlp.c_proj.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.mlp.c_proj.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.ln_2.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.4.ln_2.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.attn.in_proj_weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.attn.in_proj_bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.attn.out_proj.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.attn.out_proj.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.ln_1.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.ln_1.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.mlp.c_fc.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.mlp.c_fc.bias
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.mlp.c_proj.weight
+2025-11-22 22:27:34.976 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.mlp.c_proj.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.ln_2.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.5.ln_2.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.attn.in_proj_weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.attn.in_proj_bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.attn.out_proj.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.attn.out_proj.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.ln_1.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.ln_1.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.mlp.c_fc.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.mlp.c_fc.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.mlp.c_proj.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.mlp.c_proj.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.ln_2.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.6.ln_2.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.attn.in_proj_weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.attn.in_proj_bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.attn.out_proj.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.attn.out_proj.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.ln_1.weight
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.ln_1.bias
+2025-11-22 22:27:34.977 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.mlp.c_fc.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.mlp.c_fc.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.mlp.c_proj.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.mlp.c_proj.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.ln_2.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.7.ln_2.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.attn.in_proj_weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.attn.in_proj_bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.attn.out_proj.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.attn.out_proj.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.ln_1.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.ln_1.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.mlp.c_fc.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.mlp.c_fc.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.mlp.c_proj.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.mlp.c_proj.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.ln_2.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.8.ln_2.bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.attn.in_proj_weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.attn.in_proj_bias
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.attn.out_proj.weight
+2025-11-22 22:27:34.978 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.attn.out_proj.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.ln_1.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.ln_1.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.mlp.c_fc.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.mlp.c_fc.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.mlp.c_proj.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.mlp.c_proj.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.ln_2.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.9.ln_2.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.attn.in_proj_weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.attn.in_proj_bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.attn.out_proj.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.attn.out_proj.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.ln_1.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.ln_1.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.mlp.c_fc.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.mlp.c_fc.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.mlp.c_proj.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.mlp.c_proj.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.ln_2.weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.10.ln_2.bias
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.attn.in_proj_weight
+2025-11-22 22:27:34.979 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.attn.in_proj_bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.attn.out_proj.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.attn.out_proj.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.ln_1.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.ln_1.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.mlp.c_fc.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.mlp.c_fc.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.mlp.c_proj.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.mlp.c_proj.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.ln_2.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.transformer.resblocks.11.ln_2.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.ln_post.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.visual.ln_post.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.attn.in_proj_weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.attn.in_proj_bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.attn.out_proj.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.attn.out_proj.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.ln_1.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.ln_1.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.mlp.c_fc.weight
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.mlp.c_fc.bias
+2025-11-22 22:27:34.980 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.mlp.c_proj.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.mlp.c_proj.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.ln_2.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.0.ln_2.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.attn.in_proj_weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.attn.in_proj_bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.attn.out_proj.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.attn.out_proj.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.ln_1.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.ln_1.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.mlp.c_fc.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.mlp.c_fc.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.mlp.c_proj.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.mlp.c_proj.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.ln_2.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.1.ln_2.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.attn.in_proj_weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.attn.in_proj_bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.attn.out_proj.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.attn.out_proj.bias
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.ln_1.weight
+2025-11-22 22:27:34.981 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.ln_1.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.mlp.c_fc.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.mlp.c_fc.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.mlp.c_proj.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.mlp.c_proj.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.ln_2.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.2.ln_2.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.attn.in_proj_weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.attn.in_proj_bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.attn.out_proj.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.attn.out_proj.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.ln_1.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.ln_1.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.mlp.c_fc.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.mlp.c_fc.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.mlp.c_proj.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.mlp.c_proj.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.ln_2.weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.3.ln_2.bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.attn.in_proj_weight
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.attn.in_proj_bias
+2025-11-22 22:27:34.982 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.attn.out_proj.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.attn.out_proj.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.ln_1.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.ln_1.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.mlp.c_fc.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.mlp.c_fc.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.mlp.c_proj.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.mlp.c_proj.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.ln_2.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.4.ln_2.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.attn.in_proj_weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.attn.in_proj_bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.attn.out_proj.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.attn.out_proj.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.ln_1.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.ln_1.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.mlp.c_fc.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.mlp.c_fc.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.mlp.c_proj.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.mlp.c_proj.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.ln_2.weight
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.5.ln_2.bias
+2025-11-22 22:27:34.983 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.attn.in_proj_weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.attn.in_proj_bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.attn.out_proj.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.attn.out_proj.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.ln_1.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.ln_1.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.mlp.c_fc.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.mlp.c_fc.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.mlp.c_proj.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.mlp.c_proj.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.ln_2.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.6.ln_2.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.attn.in_proj_weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.attn.in_proj_bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.attn.out_proj.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.attn.out_proj.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.ln_1.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.ln_1.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.mlp.c_fc.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.mlp.c_fc.bias
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.mlp.c_proj.weight
+2025-11-22 22:27:34.984 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.mlp.c_proj.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.ln_2.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.7.ln_2.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.attn.in_proj_weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.attn.in_proj_bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.attn.out_proj.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.attn.out_proj.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.ln_1.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.ln_1.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.mlp.c_fc.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.mlp.c_fc.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.mlp.c_proj.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.mlp.c_proj.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.ln_2.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.8.ln_2.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.attn.in_proj_weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.attn.in_proj_bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.attn.out_proj.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.attn.out_proj.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.ln_1.weight
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.ln_1.bias
+2025-11-22 22:27:34.985 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.mlp.c_fc.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.mlp.c_fc.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.mlp.c_proj.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.mlp.c_proj.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.ln_2.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.9.ln_2.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.attn.in_proj_weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.attn.in_proj_bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.attn.out_proj.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.attn.out_proj.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.ln_1.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.ln_1.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.mlp.c_fc.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.mlp.c_fc.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.mlp.c_proj.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.mlp.c_proj.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.ln_2.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.10.ln_2.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.attn.in_proj_weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.attn.in_proj_bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.attn.out_proj.weight
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.attn.out_proj.bias
+2025-11-22 22:27:34.986 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.ln_1.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.ln_1.bias
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.mlp.c_fc.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.mlp.c_fc.bias
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.mlp.c_proj.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.mlp.c_proj.bias
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.ln_2.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.transformer.resblocks.11.ln_2.bias
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.token_embedding.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.ln_final.weight
+2025-11-22 22:27:34.987 | INFO     | utils.training:load_ckpt:378 - Unchanged_weight: module.text_model.ln_final.bias
+2025-11-22 22:27:34.999 | INFO     | utils.training:_load_and_sync_parameters:66 - Loading model from checkpoint: outputs/2025-11-17_16-05-37_outputs/2025-11-03_21-10-09_CMDM-Enc-H3D-mixtrain0.5-enc/ckpt/model300000.pt...
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.0.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.0.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.2.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.timestep_embedder.time_embed.2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.contact_adapter.weight torch.Size([512, 256]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.contact_adapter.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:34.999 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.linear.weight torch.Size([32, 9]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.bn.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.0.bn.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.linear1.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn1.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn1.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_q.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_q.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_k.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_k.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_v.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_v.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.3.weight torch.Size([32, 3]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_p.3.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.000 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.0.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.0.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.2.weight torch.Size([4, 32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.2.bias torch.Size([4]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.3.weight torch.Size([4]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.3.bias torch.Size([4]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.5.weight torch.Size([4, 4]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.transformer2.linear_w.5.bias torch.Size([4]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn2.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn2.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.linear3.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn3.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc1.1.bn3.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.linear.weight torch.Size([64, 35]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.bn.weight torch.Size([64]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.0.bn.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.linear1.weight torch.Size([64, 64]) for optimization.
+2025-11-22 22:27:35.001 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn1.weight torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn1.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_q.weight torch.Size([64, 64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_q.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_k.weight torch.Size([64, 64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_k.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_v.weight torch.Size([64, 64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_v.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.3.weight torch.Size([64, 3]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_p.3.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.0.weight torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.0.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.2.weight torch.Size([8, 64]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.2.bias torch.Size([8]) for optimization.
+2025-11-22 22:27:35.002 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.3.weight torch.Size([8]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.3.bias torch.Size([8]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.5.weight torch.Size([8, 8]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.transformer2.linear_w.5.bias torch.Size([8]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn2.weight torch.Size([64]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn2.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.linear3.weight torch.Size([64, 64]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn3.weight torch.Size([64]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc2.1.bn3.bias torch.Size([64]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.linear.weight torch.Size([128, 67]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.bn.weight torch.Size([128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.0.bn.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.linear1.weight torch.Size([128, 128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn1.weight torch.Size([128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn1.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_q.weight torch.Size([128, 128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_q.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.003 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_k.weight torch.Size([128, 128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_k.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_v.weight torch.Size([128, 128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_v.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.3.weight torch.Size([128, 3]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_p.3.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.0.weight torch.Size([128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.0.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.2.weight torch.Size([16, 128]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.2.bias torch.Size([16]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.3.weight torch.Size([16]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.3.bias torch.Size([16]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.5.weight torch.Size([16, 16]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.transformer2.linear_w.5.bias torch.Size([16]) for optimization.
+2025-11-22 22:27:35.004 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn2.weight torch.Size([128]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn2.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.linear3.weight torch.Size([128, 128]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn3.weight torch.Size([128]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc3.1.bn3.bias torch.Size([128]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.linear.weight torch.Size([256, 131]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.bn.weight torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.0.bn.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.linear1.weight torch.Size([256, 256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn1.weight torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn1.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_q.weight torch.Size([256, 256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_q.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_k.weight torch.Size([256, 256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_k.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_v.weight torch.Size([256, 256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_v.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.005 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.0.weight torch.Size([3, 3]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.0.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.1.weight torch.Size([3]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.1.bias torch.Size([3]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.3.weight torch.Size([256, 3]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_p.3.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.0.weight torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.0.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.2.weight torch.Size([32, 256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.2.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.3.weight torch.Size([32]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.3.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.5.weight torch.Size([32, 32]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.transformer2.linear_w.5.bias torch.Size([32]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn2.weight torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn2.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.linear3.weight torch.Size([256, 256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn3.weight torch.Size([256]) for optimization.
+2025-11-22 22:27:35.006 | INFO     | utils.training:__init__:43 - Add module.contact_encoder.enc4.1.bn3.bias torch.Size([256]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.language_adapter.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.language_adapter.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.motion_adapter.weight torch.Size([512, 263]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.motion_adapter.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.007 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear1.bias torch.Size([1024]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.linear2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm1.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm1.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm2.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.0.norm2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear1.bias torch.Size([1024]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.linear2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm1.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm1.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.008 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm2.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.1.norm2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear1.bias torch.Size([1024]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.linear2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm1.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm1.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm2.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.2.norm2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.009 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear1.bias torch.Size([1024]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.linear2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm1.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm1.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm2.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.3.norm2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.in_proj_weight torch.Size([1536, 512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.in_proj_bias torch.Size([1536]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.out_proj.weight torch.Size([512, 512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.self_attn.out_proj.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear1.weight torch.Size([1024, 512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear1.bias torch.Size([1024]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear2.weight torch.Size([512, 1024]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.linear2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm1.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.010 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm1.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm2.weight torch.Size([512]) for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:43 - Add module.self_attn_layer.layers.4.norm2.bias torch.Size([512]) for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:43 - Add module.motion_layer.weight torch.Size([263, 512]) for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:43 - Add module.motion_layer.bias torch.Size([263]) for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:45 - 196 parameters for optimization.
+2025-11-22 22:27:35.011 | INFO     | utils.training:__init__:46 - Total model size is 12.20 M.

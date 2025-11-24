@@ -1,0 +1,29 @@
+==================== Replication 0 ====================
+Time: 2025-11-23 17:44:16.001238
+---> [ground truth] Matching Score: 2.9693
+---> [ground truth] R_precision: (top 1): 0.5162 (top 2): 0.7091 (top 3): 0.7996 
+---> [vald] Matching Score: 3.7084
+---> [vald] R_precision: (top 1): 0.4033 (top 2): 0.5908 (top 3): 0.6963 
+Time: 2025-11-23 17:44:32.372959
+---> [ground truth] FID: 0.0016
+---> [vald] FID: 0.8294
+Time: 2025-11-23 17:44:46.035301
+---> [ground truth] Diversity: 9.2657
+---> [vald] Diversity: 9.5977
+Time: 2025-11-23 17:44:46.037191
+---> [vald] Multimodality: 0.0000
+!!! DONE !!!
+========== Matching Score Summary ==========
+---> [ground truth] Mean: 2.9693 CInterval: 0.0000
+---> [vald] Mean: 3.7084 CInterval: 0.0000
+========== R_precision Summary ==========
+---> [ground truth](top 1) Mean: 0.5162 CInt: 0.0000;(top 2) Mean: 0.7091 CInt: 0.0000;(top 3) Mean: 0.7996 CInt: 0.0000;
+---> [vald](top 1) Mean: 0.4033 CInt: 0.0000;(top 2) Mean: 0.5908 CInt: 0.0000;(top 3) Mean: 0.6963 CInt: 0.0000;
+========== FID Summary ==========
+---> [ground truth] Mean: 0.0016 CInterval: 0.0000
+---> [vald] Mean: 0.8294 CInterval: 0.0000
+========== Diversity Summary ==========
+---> [ground truth] Mean: 9.2657 CInterval: 0.0000
+---> [vald] Mean: 9.5977 CInterval: 0.0000
+========== MultiModality Summary ==========
+---> [vald] Mean: 0.0000 CInterval: 0.0000
