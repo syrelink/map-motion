@@ -21,7 +21,7 @@ class _SelectiveStateSpace(nn.Module):
         self.dt_rank = math.ceil(self.d_model / 16) if dt_rank == "auto" else dt_rank
 
         self.in_proj = nn.Linear(self.d_model, self.d_inner * 2, bias=bias)
-        self.out_proj = nn.Linear(self.d_inner, self.d_model, bias=bias)
+        self.out_proj = nn.Linear(self.d_inner * 2, self.d_model, bias=bias)
 
         self.conv_x = nn.Conv1d(
             in_channels=self.d_inner,
