@@ -1,74 +1,294 @@
-# test.py (增强版)
-
 import torch
-import sys
+import torch.nn as nn
+from omegaconf import DictConfig
 
-# --- 增强的诊断部分 ---
-# 1. 尝试导入模块，如果失败则给出明确提示
-try:
-    print("正在尝试从 'models.vrwkv' 导入模块...")
-    # 确保您的文件名是 vrwkv.py 并且在 models 文件夹下
-    from models.vrwkv import Block_time, RUN_CUDA
-    print("模块导入成功！")
-except ImportError as e:
-    print(f"\n❌ 导入失败！请检查文件路径和名称。")
-    print(f"   错误信息: {e}")
-    sys.exit(1) # 导入失败，直接退出
+from models.base import Model
+from models.modules import PositionalEncoding, TimestepEmbedder
+from models.modules import SceneMapEncoderDecoder, SceneMapEncoder
+from models.functions import load_and_freeze_clip_model, encode_text_clip, \
+    load_and_freeze_bert_model, encode_text_bert, get_lang_feat_dim_type
+from models.try_models.mamba_block import MambaBlock, BidirectionalMambaBlock
+from utils.misc import compute_repr_dimesion
 
-def test_block_dimension():
-    # 2. 检查 CUDA 内核是否成功加载
-    if RUN_CUDA is None:
-        print("\n❌ 测试无法执行：Bi-WKV CUDA kernel 未能加载。")
-        print("   这通常是由于 C++/CUDA 编译环境问题导致的。请检查：")
-        print("   - 是否已安装 g++ 和 NVIDIA CUDA Toolkit (nvcc)。")
-        print("   - 编译器路径是否在系统 PATH 中。")
-        print("   - PyTorch 和 CUDA 版本是否兼容。")
-        print("   - load() 函数中的源文件路径是否正确。")
-        return
+@Model.register()
+class CMDM(nn.Module):
 
-    # --- 定义模拟的超参数 ---
-    batch_size = 4      
-    seq_len = 60        
-    latent_dim = 512    
+    def __init__(self, cfg: DictConfig, *args, **kwargs):
+        super().__init__()
+        self.device = kwargs['device'] if 'device' in kwargs else 'cpu'
 
-    # --- 实例化我们的 Block_time 模块 ---
-    print("\n正在实例化 Block_time 模块...")
-    try:
-        rwkv_block = Block_time(
-            n_embd=latent_dim,
-            n_layer=12,
-            layer_id=5,
-        ).cuda()
-        rwkv_block.eval()
-        print("模块实例化成功！")
-    except Exception as e:
-        print(f"\n❌ 模块实例化失败: {e}")
-        return
+        self.motion_type = cfg.data_repr
+        self.motion_dim = cfg.input_feats
+        self.latent_dim = cfg.latent_dim
+        self.mask_motion = cfg.mask_motion
 
-    # --- 创建一个模拟的输入张量 ---
-    dummy_input = torch.randn(batch_size, seq_len, latent_dim).cuda()
-    print(f"\n创建了一个模拟输入张量:")
-    print(f"  - 输入形状: {dummy_input.shape}")
-    print(f"  - 预期输出形状: {dummy_input.shape}")
+        self.arch = cfg.arch
 
-    # --- 执行前向传播并检查输出 ---
-    print("\n正在执行前向传播...")
-    try:
-        with torch.no_grad():
-            output = rwkv_block(dummy_input)
+        ## time embedding
+        self.time_emb_dim = cfg.time_emb_dim
+        self.timestep_embedder = TimestepEmbedder(self.latent_dim, self.time_emb_dim, max_len=1000)
+
+        ## contact
+        self.contact_type = cfg.contact_model.contact_type
+        self.contact_dim = compute_repr_dimesion(self.contact_type)
+        self.planes = cfg.contact_model.planes
+        if self.arch in ['trans_enc', 'trans_mamba', 'trans_double_mamba']:
+            SceneMapModule = SceneMapEncoder
+            self.contact_adapter = nn.Linear(self.planes[-1], self.latent_dim, bias=True)
+        elif self.arch == 'trans_dec':
+            SceneMapModule = SceneMapEncoderDecoder
+        else:
+            raise NotImplementedError
+        self.contact_encoder = SceneMapModule(
+            point_feat_dim=self.contact_dim,
+            planes=self.planes,
+            blocks=cfg.contact_model.blocks,
+            num_points=cfg.contact_model.num_points,
+        )
         
-        print("前向传播完成！")
-        print(f"  - 实际输出形状: {output.shape}")
+        ## text
+        self.text_model_name = cfg.text_model.version
+        self.text_max_length = cfg.text_model.max_length
+        self.text_feat_dim, self.text_feat_type = get_lang_feat_dim_type(self.text_model_name)
+        if self.text_feat_type == 'clip':
+            self.text_model = load_and_freeze_clip_model(self.text_model_name)
+        elif self.text_feat_type == 'bert':
+            self.tokenizer, self.text_model = load_and_freeze_bert_model(self.text_model_name)
+        else:
+            raise NotImplementedError
+        self.language_adapter = nn.Linear(self.text_feat_dim, self.latent_dim, bias=True)
 
-        # --- 验证维度是否符合预期 ---
-        assert output.shape == dummy_input.shape, "输出形状与输入形状不匹配！"
+        ## model architecture
+        self.motion_adapter = nn.Linear(self.motion_dim, self.latent_dim, bias=True)
+        self.positional_encoder = PositionalEncoding(self.latent_dim, dropout=0.1, max_len=5000)
+
+        self.num_layers = cfg.num_layers
+        if self.arch == 'trans_enc':
+            self.self_attn_layer = nn.TransformerEncoder(
+                nn.TransformerEncoderLayer(
+                    d_model=self.latent_dim,
+                    nhead=cfg.num_heads,
+                    dim_feedforward=cfg.dim_feedforward,
+                    dropout=cfg.dropout,
+                    activation='gelu',
+                    batch_first=True,
+                ),
+                enable_nested_tensor=False,
+                num_layers=sum(cfg.num_layers),
+            )
+        elif self.arch == 'trans_mamba':
+            total_layers = sum(cfg.num_layers)
+            mamba_layers = getattr(cfg, 'mamba_layers', 1)
+            if mamba_layers > total_layers:
+                raise ValueError("cfg.mamba_layers 不能大于总层数")
+            mlp_ratio = cfg.dim_feedforward / float(self.latent_dim)
+            self.encoder_layers = nn.ModuleList()
+            for idx in range(total_layers):
+                if idx < total_layers - mamba_layers:
+                    layer = nn.TransformerEncoderLayer(
+                        d_model=self.latent_dim,
+                        nhead=cfg.num_heads,
+                        dim_feedforward=cfg.dim_feedforward,
+                        dropout=cfg.dropout,
+                        activation='gelu',
+                        batch_first=True,
+                    )
+                else:
+                    layer = MambaBlock(
+                        d_model=self.latent_dim,
+                        d_state=getattr(cfg, 'mamba_d_state', 16),
+                        d_conv=getattr(cfg, 'mamba_d_conv', 4),
+                        expand=getattr(cfg, 'mamba_expand', 2),
+                        mlp_ratio=mlp_ratio,
+                        drop=cfg.dropout,
+                        drop_path=getattr(cfg, 'mamba_drop_path', 0.0),
+                    )
+                self.encoder_layers.append(layer)
+        elif self.arch == 'trans_double_mamba':
+            # 双向 Mamba 架构：前面用 Transformer，后面用双向 Mamba
+            total_layers = sum(cfg.num_layers)
+            mamba_layers = getattr(cfg, 'mamba_layers', 2)  # 默认最后 2 层用双向 Mamba
+            if mamba_layers > total_layers:
+                raise ValueError("cfg.mamba_layers 不能大于总层数")
+            mlp_ratio = cfg.dim_feedforward / float(self.latent_dim)
+            self.encoder_layers = nn.ModuleList()
+            for idx in range(total_layers):
+                if idx < total_layers - mamba_layers:
+                    # 前面的层使用标准 Transformer
+                    layer = nn.TransformerEncoderLayer(
+                        d_model=self.latent_dim,
+                        nhead=cfg.num_heads,
+                        dim_feedforward=cfg.dim_feedforward,
+                        dropout=cfg.dropout,
+                        activation='gelu',
+                        batch_first=True,
+                    )
+                else:
+                    # 后面的层使用双向 Mamba
+                    layer = BidirectionalMambaBlock(
+                        d_model=self.latent_dim,
+                        d_state=getattr(cfg, 'mamba_d_state', 16),
+                        d_conv=getattr(cfg, 'mamba_d_conv', 4),
+                        expand=getattr(cfg, 'mamba_expand', 2),
+                        mlp_ratio=mlp_ratio,
+                        drop=cfg.dropout,
+                        drop_path=getattr(cfg, 'mamba_drop_path', 0.0),
+                    )
+                self.encoder_layers.append(layer)
+        elif self.arch == 'trans_dec':
+            self.self_attn_layers = nn.ModuleList()
+            self.kv_mappling_layers = nn.ModuleList()
+            self.cross_attn_layers = nn.ModuleList()
+            for i, n in enumerate(self.num_layers):
+                self.self_attn_layers.append(
+                    nn.TransformerEncoder(
+                        nn.TransformerEncoderLayer(
+                            d_model=self.latent_dim,
+                            nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward,
+                            dropout=cfg.dropout,
+                            activation='gelu',
+                            batch_first=True,
+                        ),
+                        num_layers=n,
+                    )
+                )
+
+                if i != len(self.num_layers) - 1:
+                    self.kv_mappling_layers.append(
+                        nn.Sequential(
+                            nn.Linear(self.planes[-1-i], self.latent_dim, bias=True),
+                            nn.LayerNorm(self.latent_dim),
+                        )
+                    )
+                    self.cross_attn_layers.append(
+                        nn.TransformerDecoderLayer(
+                            d_model=self.latent_dim,
+                            nhead=cfg.num_heads,
+                            dim_feedforward=cfg.dim_feedforward,
+                            dropout=cfg.dropout,
+                            activation='gelu',
+                            batch_first=True,
+                        )
+                    )
+        else:
+            raise NotImplementedError
+        self.motion_layer = nn.Linear(self.latent_dim, self.motion_dim, bias=True)
+
+    def forward(self, x, timesteps, **kwargs):
+        """ Forward pass of the model.
+
+        Args:
+            x: input motion, [bs, seq_len, motion_dim]
+            kwargs: other inputs, e.g., contact, text
         
-        print("\n✅ 测试通过！输入和输出的维度完全符合预期。")
+        Return:
+            Output motion, [bs, seq_len, motion_dim]
+        """
+        ## time embedding
+        time_emb = self.timestep_embedder(timesteps) # [bs, 1, latent_dim]
+        time_mask = torch.zeros((x.shape[0], 1), dtype=torch.bool, device=self.device)
 
-    except Exception as e:
-        print(f"\n❌ 测试失败！在前向传播过程中发生错误。这很可能是 CUDA 内核执行时的问题。")
-        print(f"   错误信息: {e}")
+        ## text embedding
+        if self.text_feat_type == 'clip':
+            text_emb = encode_text_clip(self.text_model, kwargs['c_text'], max_length=self.text_max_length, device=self.device)
+            text_emb = text_emb.unsqueeze(1).detach().float()
+            text_mask = torch.zeros((x.shape[0], 1), dtype=torch.bool, device=self.device)
+        elif self.text_feat_type == 'bert':
+            text_emb, text_mask = encode_text_bert(self.tokenizer, self.text_model, kwargs['c_text'], max_length=self.text_max_length, device=self.device)
+            text_mask = ~(text_mask.to(torch.bool)) # 0 for valid, 1 for invalid
+        else:
+            raise NotImplementedError
+        if 'c_text_mask' in kwargs:
+            text_mask = torch.logical_or(text_mask, kwargs['c_text_mask'].repeat(1, text_mask.shape[1]))
+        if 'c_text_erase' in kwargs:
+            text_emb = text_emb * (1. - kwargs['c_text_erase'].unsqueeze(-1).float())
+        text_emb = self.language_adapter(text_emb) # [bs, 1, latent_dim]
 
-# --- 运行测试 ---
-if __name__ == "__main__":
-    test_block_dimension()
+        ## encode contact
+        cont_emb = self.contact_encoder(kwargs['c_pc_xyz'], kwargs['c_pc_contact'])
+        if hasattr(self, 'contact_adapter'): # trans_enc, trans_mamba, trans_double_mamba
+            cont_mask = torch.zeros((x.shape[0], cont_emb.shape[1]), dtype=torch.bool, device=self.device)
+            if 'c_pc_mask' in kwargs:
+                cont_mask = torch.logical_or(cont_mask, kwargs['c_pc_mask'].repeat(1, cont_mask.shape[1]))
+            if 'c_pc_erase' in kwargs:
+                cont_emb = cont_emb * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
+            cont_emb = self.contact_adapter(cont_emb) # [bs, num_groups, latent_dim]
+
+            # Classifier-Free Guidance: 训练时随机丢弃接触条件
+            if self.use_cfg and self.training:
+                # 以 cfg_dropout_prob 的概率将接触条件置零
+                cfg_mask = torch.rand(x.shape[0], 1, 1, device=self.device) < self.cfg_dropout_prob
+                cont_emb = cont_emb * (~cfg_mask).float()
+
+        ## motion embedding
+        x = self.motion_adapter(x) # [bs, seq_len, latent_dim]
+        if self.arch == 'trans_enc':
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1) # [bs, 2 + num_groups + seq_len, latent_dim]
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, cont_mask, kwargs['x_mask']], dim=1) # [bs, 2 + num_groups + seq_len]
+            x = self.self_attn_layer(x, src_key_padding_mask=x_mask)
+
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        elif self.arch == 'trans_mamba':
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, cont_mask, kwargs['x_mask']], dim=1)
+            for layer in self.encoder_layers:
+                if isinstance(layer, nn.TransformerEncoderLayer):
+                    x = layer(x, src_key_padding_mask=x_mask)
+                else:
+                    x = layer(x, padding_mask=x_mask)
+
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        elif self.arch == 'trans_double_mamba':
+            # 与 trans_mamba 类似的处理流程，但使用双向 Mamba
+            x = torch.cat([time_emb, text_emb, cont_emb, x], dim=1)
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, cont_mask, kwargs['x_mask']], dim=1)
+
+            for layer in self.encoder_layers:
+                if isinstance(layer, nn.TransformerEncoderLayer):
+                    x = layer(x, src_key_padding_mask=x_mask)
+                else:  # BidirectionalMambaBlock
+                    x = layer(x, padding_mask=x_mask)
+
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1] + cont_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        elif self.arch == 'trans_dec':
+            x = torch.cat([time_emb, text_emb, x], dim=1) # [bs, 2 + seq_len, latent_dim]
+            x = self.positional_encoder(x.permute(1, 0, 2)).permute(1, 0, 2)
+
+            x_mask = None
+            if self.mask_motion:
+                x_mask = torch.cat([time_mask, text_mask, kwargs['x_mask']], dim=1) # [bs, 2 + seq_len]
+            for i in range(len(self.num_layers)):
+                x = self.self_attn_layers[i](x, src_key_padding_mask=x_mask) # self attention
+                if i != len(self.num_layers) - 1: # cross attention
+                    mem = cont_emb[i]
+                    mem_mask = torch.zeros((x.shape[0], mem.shape[1]), dtype=torch.bool, device=self.device)
+                    if 'c_pc_mask' in kwargs:
+                        mem_mask = torch.logical_or(mem_mask, kwargs['c_pc_mask'].repeat(1, mem_mask.shape[1]))
+                    if 'c_pc_erase' in kwargs:
+                        mem = mem * (1. - kwargs['c_pc_erase'].unsqueeze(-1).float())
+                    mem = self.kv_mappling_layers[i](mem)
+                    x = self.cross_attn_layers[i](x, mem, tgt_key_padding_mask=x_mask, memory_key_padding_mask=mem_mask)
+
+            non_motion_token = time_mask.shape[1] + text_mask.shape[1]
+            x = x[:, non_motion_token:, :]
+        else:
+            raise NotImplementedError
+
+        x = self.motion_layer(x)
+        return x

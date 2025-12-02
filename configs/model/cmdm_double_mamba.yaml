@@ -1,0 +1,43 @@
+name: CMDM
+
+## modeling space
+input_feats: -1
+data_repr: 'pos'
+
+## time embedding
+time_emb_dim: 512
+
+## conditions
+## 1. contact
+contact_model:
+  contact_type: 'contact_cont_joints' # ['contact_one_joints', 'contact_all_joints', 'contact_cont_joints', 'contact_pelvis']
+  contact_joints: [0, 10, 11, 12, 20, 21]
+
+  planes: [32, 64, 128, 256]
+  num_points: ${task.dataset.num_points}
+  blocks: [2, 2, 2, 2]
+
+## 2. text
+text_model:
+  version: 'ViT-B/32'
+  max_length: 32
+
+## model architecture - 双向 Mamba 架构
+arch: 'trans_double_mamba'
+latent_dim: 512
+mask_motion: true
+num_layers: [1,1,1,1,1]  # 总共 5 层
+num_heads: 8
+dropout: 0.1
+dim_feedforward: 1024
+
+# 双向 Mamba 特定参数
+mamba_layers: 2          # 最后 2 层使用双向 Mamba
+mamba_d_state: 32        # Mamba 状态维度（从 16 增加到 32）
+mamba_d_conv: 8          # Mamba 卷积核大小（从 4 增加到 8）
+mamba_expand: 2          # Mamba 扩展因子
+mamba_drop_path: 0.1     # Mamba 的 stochastic depth
+
+# Classifier-Free Guidance 参数
+use_cfg: true            # 启用 CFG
+cfg_dropout_prob: 0.1    # 训练时丢弃条件的概率（10%）
